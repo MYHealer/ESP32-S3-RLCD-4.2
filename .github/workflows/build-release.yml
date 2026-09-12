@@ -1,0 +1,367 @@
+name: 构建固件并附加到 Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "需要构建的版本标签，例如 v1.5.10"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clock-firmware-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    name: ESP32-S3 固件
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: 确定构建版本
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本格式无效：$REQUESTED_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 检出受信任默认分支源码
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: 校验源码版本
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_version="$(sed -n 's/.*PROJECT_VER "\(v[^"]*\)".*/\1/p' RLCD_CLOCK/CMakeLists.txt | head -n 1)"
+          if [[ "$project_version" != "$EXPECTED_VERSION" ]]; then
+            echo "标签版本 $EXPECTED_VERSION 与工程版本 $project_version 不一致" >&2
+            exit 1
+          fi
+          git fetch --force origin "refs/tags/$EXPECTED_VERSION:refs/tags/$EXPECTED_VERSION"
+          tag_commit="$(git rev-list -n 1 "$EXPECTED_VERSION")"
+          source_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$source_commit" ]]; then
+            echo "拒绝构建：标签 $EXPECTED_VERSION 未指向默认分支当前提交" >&2
+            exit 1
+          fi
+
+      - name: 准备私有 OTA 端点
+        env:
+          OTA_MANIFEST_URL: ${{ secrets.WEATHER_CLOCK_OTA_MANIFEST_URL }}
+          OTA_BACKUP_MANIFEST_URL: ${{ secrets.WEATHER_CLOCK_OTA_BACKUP_MANIFEST_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/prepare_ota_endpoint.py \
+            --output RLCD_CLOCK/main/core/ota_endpoint_local.h
+          test -s RLCD_CLOCK/main/core/ota_endpoint_local.h
+          echo "Private OTA endpoint configuration prepared"
+
+      - name: 编译并生成双固件
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.3
+          target: esp32s3
+          path: RLCD_CLOCK
+          command: >-
+            set -euo pipefail;
+            idf.py build;
+            cp build/weather_clock.bin "../weather_clock_${{ steps.version.outputs.version }}.bin";
+            cd build;
+            esptool.py --chip esp32s3 merge_bin -o "../../weather_clock_${{ steps.version.outputs.version }}_merged.bin" @flash_args
+
+      - name: 校验构建产物
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "weather_clock_${VERSION}.bin"
+          test -s "weather_clock_${VERSION}_merged.bin"
+          sha256sum "weather_clock_${VERSION}.bin" "weather_clock_${VERSION}_merged.bin"
+
+      - name: 等待同版本 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_ready=0
+          for _ in $(seq 1 30); do
+            if gh release view "$VERSION" >/dev/null 2>&1; then
+              release_ready=1
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$release_ready" != "1" ]]; then
+            echo "等待同版本 Release 超时：$VERSION" >&2
+            exit 1
+          fi
+
+      - name: 生成 OTA 清单
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_base="https://github.com/$GITHUB_REPOSITORY/releases/download/$VERSION"
+          python3 .github/scripts/update_manifests.py \
+            --version "$VERSION" \
+            --app "weather_clock_${VERSION}.bin" \
+            --merged "weather_clock_${VERSION}_merged.bin" \
+            --artifact-base "$artifact_base" \
+            --notes-file firmware/OTA_RELEASE_NOTES.md \
+            --latest firmware/latest.json \
+            --versions firmware/versions.json
+
+      - name: 保存 Actions 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-clock-${{ steps.version.outputs.version }}
+          path: |
+            weather_clock_${{ steps.version.outputs.version }}.bin
+            weather_clock_${{ steps.version.outputs.version }}_merged.bin
+            firmware/latest.json
+            firmware/versions.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 附加到现有 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body_before="$(gh release view "$VERSION" --json body --jq .body)"
+          gh release upload "$VERSION" \
+            "weather_clock_${VERSION}.bin" \
+            "weather_clock_${VERSION}_merged.bin" \
+            --clobber
+          body_after="$(gh release view "$VERSION" --json body --jq .body)"
+          if [[ "$body_before" != "$body_after" ]]; then
+            echo "上传附件后 Release 描述发生变化" >&2
+            exit 1
+          fi
+
+      - name: 更新源码仓库 OTA 清单
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp firmware/latest.json "$RUNNER_TEMP/latest.json"
+          cp firmware/versions.json "$RUNNER_TEMP/versions.json"
+          git fetch origin main
+          git checkout -B ota-manifest-update origin/main
+          mkdir -p firmware
+          cp "$RUNNER_TEMP/latest.json" firmware/latest.json
+          cp "$RUNNER_TEMP/versions.json" firmware/versions.json
+          if git diff --quiet -- firmware/latest.json firmware/versions.json; then
+            echo "OTA 清单无需更新"
+          else
+            git config user.name "GitHub Actions Firmware Builder"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add firmware/latest.json firmware/versions.json
+            git commit -m "Update ${VERSION} OTA manifests [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: 通知 GitHub OTA 主仓库同步
+        env:
+          OTA_MIRROR_DISPATCH_TOKEN: ${{ secrets.OTA_MIRROR_DISPATCH_TOKEN }}
+          OTA_MIRROR_REPOSITORY: ${{ vars.OTA_MIRROR_REPOSITORY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$OTA_MIRROR_DISPATCH_TOKEN" ]]; then
+            echo "OTA_MIRROR_DISPATCH_TOKEN 未配置" >&2
+            exit 1
+          fi
+          mirror_repo="${OTA_MIRROR_REPOSITORY:-wickenzh/ESP32-S3-RLCD-4.2_UP}"
+          payload="$RUNNER_TEMP/ota-mirror-dispatch.json"
+          python3 - "$payload" "$VERSION" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          output, version, repository, source_sha, run_id = sys.argv[1:]
+          Path(output).write_text(json.dumps({
+              "event_type": "clock_firmware_ready",
+              "client_payload": {
+                  "version": version,
+                  "source_repository": repository,
+                  "source_sha": source_sha,
+                  "source_run_id": run_id,
+              },
+          }), encoding="utf-8")
+          PY
+          response="$RUNNER_TEMP/ota-mirror-dispatch-response.json"
+          status="$(curl -sS --retry 3 --retry-all-errors --connect-timeout 10 --max-time 45 \
+            -o "$response" -w '%{http_code}' \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $OTA_MIRROR_DISPATCH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data-binary "@$payload" \
+            "https://api.github.com/repos/$mirror_repo/dispatches")"
+          if [[ "$status" != "204" ]]; then
+            echo "通知 GitHub OTA 主仓库失败：HTTP $status" >&2
+            cat "$response" >&2
+            exit 1
+          fi
+          echo "GitHub OTA mirror dispatch accepted for $VERSION"
+
+      - name: 通知 Gitee OTA 备用仓库同步
+        env:
+          GITEE_OTA_TOKEN: ${{ secrets.GITEE_OTA_TOKEN }}
+          GITEE_OTA_REPOSITORY: ${{ vars.GITEE_OTA_REPOSITORY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GITEE_OTA_TOKEN" ]]; then
+            echo "GITEE_OTA_TOKEN 未配置" >&2
+            exit 1
+          fi
+          target_repo="${GITEE_OTA_REPOSITORY:-liu-zhonghao/esp32-s3-rlcd-4.2_-up}"
+          python3 .github/scripts/gitee_ota_notify.py \
+            --target-repository "$target_repo" \
+            --version "$VERSION" \
+            --source-repository "$GITHUB_REPOSITORY" \
+            --source-sha "$GITHUB_SHA" \
+            --source-run-id "$GITHUB_RUN_ID" \
+            --latest firmware/latest.json \
+            --versions firmware/versions.json
+          echo "Gitee OTA mirror request accepted for $VERSION"
+
+  notify-feishu:
+    name: 飞书构建结果通知
+    needs: build-and-upload
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出通知格式化工具
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: 推送构建结果与 Release 更新内容
+        continue-on-error: true
+        env:
+          FEISHU_BUILD_WEBHOOK: ${{ secrets.FEISHU_BUILD_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RESULT: ${{ needs.build-and-upload.result }}
+          REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$FEISHU_BUILD_WEBHOOK" ]]; then
+            echo "::warning::FEISHU_BUILD_WEBHOOK 未配置，跳过飞书通知"
+            exit 0
+          fi
+          case "$BUILD_RESULT" in
+            success) result_text="成功" ;;
+            failure) result_text="失败" ;;
+            cancelled) result_text="已取消" ;;
+            *) result_text="$BUILD_RESULT" ;;
+          esac
+
+          send_feishu_payload() {
+            local payload="$1"
+            local response="$2"
+            local label="$3"
+            local status
+            status="$(curl -sS --retry 2 --retry-all-errors --connect-timeout 10 --max-time 30 \
+              -o "$response" -w '%{http_code}' \
+              -X POST \
+              -H 'Content-Type: application/json; charset=utf-8' \
+              --data-binary "@$payload" \
+              "$FEISHU_BUILD_WEBHOOK")"
+            if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+              echo "飞书${label}通知失败：HTTP $status" >&2
+              return 1
+            fi
+            python3 - "$response" "$label" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          result = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          label = sys.argv[2]
+          code = result.get("code", result.get("StatusCode", 0))
+          if code != 0:
+              raise SystemExit(f"飞书{label}通知返回失败状态：{code}")
+          PY
+          }
+
+          payload="$RUNNER_TEMP/feishu-build-notification.json"
+          python3 - "$payload" "$REQUESTED_VERSION" "$result_text" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          output, version, result, repository, run_id = sys.argv[1:]
+          run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+          text = (
+              f"天气时钟固件构建{result}\n"
+              f"版本：{version}\n"
+              f"仓库：{repository}\n"
+              f"详情：{run_url}"
+          )
+          Path(output).write_text(json.dumps({
+              "msg_type": "text",
+              "content": {"text": text},
+          }, ensure_ascii=False), encoding="utf-8")
+          PY
+          send_feishu_payload \
+            "$payload" \
+            "$RUNNER_TEMP/feishu-build-response.json" \
+            "构建结果"
+          echo "飞书构建结果通知已发送"
+
+          if [[ "$BUILD_RESULT" != "success" ]]; then
+            exit 0
+          fi
+
+          release_body="$RUNNER_TEMP/feishu-release-body.md"
+          release_url="https://github.com/$GITHUB_REPOSITORY/releases/tag/$REQUESTED_VERSION"
+          gh release view "$REQUESTED_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body > "$release_body"
+          release_payload="$RUNNER_TEMP/feishu-release-notification.json"
+          python3 .github/scripts/release_notes.py feishu-payload \
+            --version "$REQUESTED_VERSION" \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-url "$release_url" \
+            --input "$release_body" \
+            --output "$release_payload"
+          send_feishu_payload \
+            "$release_payload" \
+            "$RUNNER_TEMP/feishu-release-response.json" \
+            "Release 更新"
+          echo "飞书 Release 更新通知已发送"

@@ -1,0 +1,145 @@
+{
+  "latest": "v1.6.4",
+  "items": [
+    {
+      "version": "v1.6.4",
+      "notes": "v1.6.4：共 4 项更新。\n1. 聚合天气新增四枚用户提供的 14px 雪花素材，按雨雪天气错落显示并复用既有云层与整点…\n2. Host Web 新增界面预览直达与页签哈希导航，支持刷新、前进后退及离线回退。\n3. 修复聚合天气晴天、夜晴和雨雪代码分类边界：夜晴代码回归普通样式，雨纹仅用于支持的雨雪代…\n4. 优化雨雪天气图案与温度读数的空间避让，保持四枚雪花位置稳定，不增加动画或额外联网。\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.4/weather_clock_v1.6.4.bin",
+        "sha256": "9e65b3d4f006638103088eab86538bb9f7be6c53b16dcd75fea6be1d26e28db1",
+        "size": 6288368
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.4/weather_clock_v1.6.4_merged.bin",
+        "sha256": "0eb3c694b64a37069b10babfb3a3913fca2801faa65a58f4940b99da6e9f63f0",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.6.3",
+      "notes": "v1.6.3：共 3 项更新。\n1. 修复天气看板建议可能沿用过期日期天气的问题，改为按当天日期匹配有效预报；雨雪天气明确提…\n2. 优化聚合时钟晴雨视觉：晴天显示弧形光晕与放射点线，雨天显示不等宽深波浪云层与斜雨线；靠…\n3. 聚合天气图案仅随已有整点天气结果切换，状态不变不额外重绘，不增加联网或动画任务。\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.3/weather_clock_v1.6.3.bin",
+        "sha256": "7210008ba77e7b50a5edb2246ff2d40c6e43b7a3990c00256911a150cd670ff8",
+        "size": 6288000
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.3/weather_clock_v1.6.3_merged.bin",
+        "sha256": "d62c596eb158aa695e746e62c02fc499e486a3e284d5af410919d2062ec7efcc",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.6.2",
+      "notes": "v1.6.2：共 2 项更新。\n1. 优化设置页视觉层次：所有选项采用 1px 圆角框，分类选中使用框内短竖条标记，操作项继…\n2. 优化设置页分类选中反馈：选中文字轻微右移 2px，取消选中后恢复原位置，外框和菜单坐标…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.2/weather_clock_v1.6.2.bin",
+        "sha256": "bff1d67dd0d3569a44f60099baf80d6481d5ab56936bb3ce19a4f6a9acce0082",
+        "size": 6286976
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.2/weather_clock_v1.6.2_merged.bin",
+        "sha256": "4cafa94836060bbf2589ab803933001bfac86fa1659d14a58bff8996bb107280",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.6.1",
+      "notes": "v1.6.1：共 2 项更新。\n1. 优化聚合时钟信息区：天气标题改为反显、正文使用白底，日期采用细框，并以静态有方向点阵过…\n2. 优化图片时钟每日文字装饰线：根据文字实际宽度自适应显示两侧双线；原有数字、字号、位置和…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.1/weather_clock_v1.6.1.bin",
+        "sha256": "8a8ac5d91fffa97a646943bab8c56f0f4fc3481a155a41a65db4620d480fe344",
+        "size": 6286736
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.1/weather_clock_v1.6.1_merged.bin",
+        "sha256": "285d247c198f8d1bfe09fff10377d1ba0df1581cb00c3f0db354a14ce340d8b8",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.6.0",
+      "notes": "v1.6.0：共 8 项更新。\n1. 新增“聚合时钟”页面，将秒级时间、当天天气、日期农历和本地温湿度集中显示，支持页面开关…\n2. 聚合时钟采用灰度点阵信息区、天气图标与温湿度图标，数字和农历加粗，单日日期不补零。\n3. 修复连续浏览多个页面后进入设置可能崩溃的问题，完善界面内存分配与低内存保护。\n4. 修复聚合时钟日期被裁切、冒号偏移及图标边缘异常，统一信息区留白和边界。\n5. 修正农历月份与日期的对应关系，并支持闰月显示。\n6. 补充时间画布申请失败后的恢复机制，避免时间区持续空白。\n其余 2 项见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.0/weather_clock_v1.6.0.bin",
+        "sha256": "67b00e2f571ab32ec0ae5f9c0cdefe10c711d60294934ed646b6471f7ad280eb",
+        "size": 6285968
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.6.0/weather_clock_v1.6.0_merged.bin",
+        "sha256": "37843ab52555d7564221935a16db6782f140ff3e57771c190db2bc6af72fc39f",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.5.41",
+      "notes": "v1.5.41：共 2 项更新。\n1. 修复 RLCD 像素 LUT 初始化中的循环类型边界，避免极端显示尺寸下窄类型与宽类型…\n2. 修复 Bosch SensorLib 在大长度 FIFO 和 KLIO 模式列表下可能…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.41/weather_clock_v1.5.41.bin",
+        "sha256": "20d7e5047890bf634a4e10aab003cb1953b18a7b9d2a0f2b8860891360f2cc48",
+        "size": 6266880
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.41/weather_clock_v1.5.41_merged.bin",
+        "sha256": "91098e4343421f4430ab62cec0d77b86d7683049774fbc8e8c011300672bbed1",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.5.40",
+      "notes": "v1.5.40：共 1 项更新。\n1. 修复退出低电量极简模式后没有返回进入前工作页的问题；同一次开机中电量恢复到 13% 以…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.40/weather_clock_v1.5.40.bin",
+        "sha256": "5a968ac9246be47d8d239b349be9ebf81286e7866c1a81cef682799ab831f88b",
+        "size": 6266784
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.40/weather_clock_v1.5.40_merged.bin",
+        "sha256": "6af9ef55bc2694547e8c3b0c57abd82a1ad1d6305d97f5d053f4dd48dc33687d",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.5.39",
+      "notes": "v1.5.39：共 2 项更新。\n1. 修复从温湿时钟切换到小智页面时，底部温湿度与日期区域可能残留上一页像素的问题；切页首帧…\n2. 恢复 Power Demo 原有的独立 wifi_secrets.h 配置方式，撤销读…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.39/weather_clock_v1.5.39.bin",
+        "sha256": "95a0004a15e60f1aa8d0e64780a5d3baaadbdacd2a0ccf72ed45829783c7dff3",
+        "size": 6266128
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.39/weather_clock_v1.5.39_merged.bin",
+        "sha256": "5a92448e7bf940dc0a790f614a22bfbfa115643ca56b6e721a70d944c72b3367",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.5.38",
+      "notes": "v1.5.38：共 8 项更新。\n1. 修复小智待唤醒、首次进入实时会话及离开页面时的 Wi-Fi 省电状态和 PM 锁校准，…\n2. 修正 ESP-IDF 新 I2C 主机接口的超时单位，避免慢总线或外设异常时实际等待时…\n3. 修复 SensorLib 调试帧长度校验缺失，异常帧不再可能越界复制。\n4. 修正显示驱动同时支持 LUT 与非 LUT 算法时的构建测试定位，保证两种实现均按各自…\n5. 上位机 Web Serial 烧录依赖改为固定版本并随项目本地提供，避免运行时第三方…\n6. Power Demo 不再把本机 Wi-Fi 凭据编译进固件，改为读取正式固件已保存的…\n其余 2 项见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.38/weather_clock_v1.5.38.bin",
+        "sha256": "ec771de44bbb001b891a0d5a69bfd6ec20037e92c3fb5db7c23cae7e75ff70ce",
+        "size": 6266112
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.38/weather_clock_v1.5.38_merged.bin",
+        "sha256": "03c777128f44315234ae96183efe3ac4921e8bb52c695d4fd1c6d65252067812",
+        "size": 16509951
+      }
+    },
+    {
+      "version": "v1.5.37",
+      "notes": "v1.5.37：共 4 项更新。\n1. GitHub 公开源码首页新增完整英文版本和中英文切换入口，并补充微雪官方产品、硬件文…\n2. 修复电池实际充满时“上次满电时间”不更新的问题；现在仅在确认充电、会话从 96% 以下…\n3. 修复关机重启后的电压恢复可能被误记为一次满电的问题；拔线、高电量开机和普通电压回落不再…\n4. 统一中英文用户手册、开发规范和项目指南中的满电判定说明，明确无充电状态引脚时采用保守…\n完整说明见源码仓库同版本 Release。",
+      "app": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.37/weather_clock_v1.5.37.bin",
+        "sha256": "65b46b262c9354660e2b3f91ae6530c28d415e0c754d23c37c11fd327e29270f",
+        "size": 6265952
+      },
+      "merged": {
+        "url": "https://github.com/wickenzh/ESP32-S3-RLCD-4.2/releases/download/v1.5.37/weather_clock_v1.5.37_merged.bin",
+        "sha256": "ba086ac7365540141a9588ad68fd2c0afb17f09ba877ea771fe77510773a3a61",
+        "size": 16509951
+      }
+    }
+  ]
+}

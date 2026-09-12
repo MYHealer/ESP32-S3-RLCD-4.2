@@ -1,0 +1,14 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
+nvs,      data, nvs,     ,         0x6000,
+otadata,  data, ota,     ,         0x2000,
+phy_init, data, phy,     ,         0x1000,
+ota_0,    app,  ota_0,   ,         0x6C0000,
+ota_1,    app,  ota_1,   ,         0x6C0000,
+assets,   data, 0x40,    ,         2M,
+# srmodels.bin 实际约 123KB，原 384K 是为余量预留的；16MB flash 末尾已无
+# 空闲，故收至 128K，把腾出的空间给 coredump。
+model,    data, spiffs,  ,         128K,
+# 崩溃现场分区。必须与 sdkconfig 的 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+# 成对存在，缺一则崩溃时静默丢弃现场。
+coredump, data, coredump, ,         64K,

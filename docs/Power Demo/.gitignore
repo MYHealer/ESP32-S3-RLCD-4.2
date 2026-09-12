@@ -1,0 +1,10 @@
+# macOS 元数据不属于工程源码。
+.DS_Store
+
+# 本地 Wi-Fi 凭据会编译进固件，但绝不能提交到版本库。
+main/wifi_secrets.h
+
+# ESP-IDF 本机构建产物。
+build/
+sdkconfig
+sdkconfig.old

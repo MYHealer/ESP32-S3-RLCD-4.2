@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "power_demo.cpp"
+        "power_ui.cpp"
+        "calendar_lunar.cpp"
+        "fonts/power_font_16.c"
+        "fonts/power_font_24.c"
+        "fonts/power_digits_48.c"
+        "fonts/power_lunar_24.c"
+    INCLUDE_DIRS
+        "."
+        "assets"
+    REQUIRES
+        power_codec
+        power_display
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_i2s
+        esp_adc
+        esp_event
+        esp_netif
+        esp_wifi
+        lwip
+        nvs_flash
+    EMBED_FILES
+        "assets/hourly_chime.pcm")

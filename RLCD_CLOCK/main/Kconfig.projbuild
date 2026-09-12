@@ -1,0 +1,9 @@
+menu "Xiaozhi AI"
+
+config XIAOZHI_AI_OTA_URL
+    string "Xiaozhi activation URL"
+    default "https://api.tenclass.net/xiaozhi/ota/"
+    help
+        Official XiaoZhi activation endpoint. The weather-clock OTA service is not affected.
+
+endmenu

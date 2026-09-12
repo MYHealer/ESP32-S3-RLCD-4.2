@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "src/audio_codec_ctrl_i2c.c"
+        "src/audio_codec_gpio.c"
+        "src/es8311.c"
+        "src/esp_codec_dev_vol.c"
+        "src/power_codec_cleanup.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "private_include"
+        "src"
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_i2c
+        log
+)

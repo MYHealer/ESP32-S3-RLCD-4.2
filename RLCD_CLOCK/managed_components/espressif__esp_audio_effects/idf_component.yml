@@ -1,0 +1,23 @@
+description: Espressif audio effects
+issues: https://github.com/espressif/esp-adf/issues
+repository: git://github.com/espressif/esp-adf-libs.git
+repository_info:
+  commit_sha: 4d5cbe02f59fb45e40112d63317a8ddd00019cd4
+  path: esp_audio_effects
+tags:
+- multimedia
+- audio_effects
+- rate_conversion
+- mixer
+- equalizer
+- fade
+- sonic
+- drc
+- mbc
+- alc
+- data_weaver
+- resample
+- channel_conversion
+- bit_conversion
+url: https://github.com/espressif/esp-adf-libs/tree/master/esp_audio_effects
+version: 1.2.1

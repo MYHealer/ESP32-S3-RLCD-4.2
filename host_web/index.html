@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c0e10">
+  <title>WeatherClock 上位机</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">42</span>
+      <div>
+        <h1>WeatherClock 上位机</h1>
+        <p>GIF 动图与静图资源制作、预览和写入</p>
+      </div>
+    </div>
+    <div class="top-meta">
+      <span>使用 Edge / Chrome · 素材与配置本地处理，不上传服务器</span>
+      <span><b>v0.0.30</b> · <span id="cacheState">离线缓存准备中</span></span>
+    </div>
+    <div class="top-actions">
+      <span id="serialSupport" class="status-pill">检测中</span>
+      <button id="installAppBtn" class="icon-button" type="button" title="安装为本地应用" aria-label="安装为本地应用">
+        <span aria-hidden="true">+</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="workspace">
+      <nav class="tabs" aria-label="上位机功能">
+        <button class="tab is-active" data-tab="assets" type="button">资源制作</button>
+        <button class="tab" data-tab="writer" type="button">资源写入</button>
+        <button class="tab" data-tab="firmware" type="button">固件烧录</button>
+        <button class="tab" data-tab="serial" type="button">串口日志</button>
+        <button class="tab" data-tab="screens" type="button">界面预览</button>
+        <button class="tab" data-tab="settings" type="button">设置</button>
+      </nav>
+
+      <section id="assets" class="tab-panel is-active">
+        <div class="work-summary">
+          <div class="summary-specs">
+            <div><span>GIF 动图</span><strong>84 x 84 / 60 帧</strong></div>
+            <div><span>静图</span><strong>220 x 208 / 最多 24 张</strong></div>
+          </div>
+          <p id="summaryNote" class="summary-note">资源包可同时包含 GIF 动图和静图；写入设备后重启，固件会优先加载自定义资源。</p>
+          <div class="summary-actions">
+            <button id="buildAssetsBtn" class="primary-button" type="button">③ 生成资源包</button>
+            <button id="downloadAssetsBtn" class="secondary-button" type="button" disabled>下载 BIN（可选）</button>
+          </div>
+        </div>
+        <div id="assetReadyNotice" class="asset-ready-notice" hidden>
+          <p id="assetReadyMessage" role="status"></p>
+          <button id="goToWriterBtn" class="primary-button" type="button">前往资源写入</button>
+        </div>
+        <div class="asset-grid">
+          <div class="asset-card gif-asset-card">
+            <h2>GIF 动图</h2>
+            <label class="file-picker">
+              <span>① 选择 GIF（只支持 GIF 文件）</span>
+              <input id="gifInput" type="file" accept="image/gif">
+            </label>
+            <div class="mini-settings">
+              <label class="control-fit">
+                <span>适配方式</span>
+                <select id="gifFit">
+                  <option value="cover" selected>铺满裁切</option>
+                  <option value="contain">完整显示</option>
+                  <option value="stretch">拉伸</option>
+                </select>
+              </label>
+              <label class="control-threshold">
+                <span>阈值 <b id="gifThresholdValue">150</b></span>
+                <input id="gifThreshold" type="range" min="0" max="255" value="150">
+              </label>
+              <label class="check-row control-dither"><input id="gifDither" type="checkbox" checked> 抖动</label>
+              <label class="check-row control-invert"><input id="gifInvert" type="checkbox"> 反色</label>
+            </div>
+            <div class="canvas-pair small-canvas preview-band">
+              <div>
+                <span>原始 GIF</span>
+                <div class="gif-source-box">
+                  <img id="gifOriginalPreview" alt="原始 GIF 预览">
+                  <canvas id="gifSourceCanvas" width="84" height="84"></canvas>
+                </div>
+              </div>
+              <div><span>转换预览</span><canvas id="gifPreviewCanvas" width="84" height="84"></canvas></div>
+            </div>
+            <div class="action-strip">
+              <button id="previewGifBtn" class="primary-button" type="button">② 转换 GIF</button>
+              <button id="clearGifBtn" class="secondary-button" type="button">清除 GIF</button>
+            </div>
+          </div>
+
+          <div class="asset-card image-asset-card">
+            <h2>静图</h2>
+            <label class="file-picker">
+              <span>① 选择静图（JPG / PNG / WebP / BMP 等）</span>
+              <input id="imageInput" type="file" accept="image/*" multiple>
+            </label>
+            <div class="mini-settings">
+              <label class="control-fit">
+                <span>适配方式</span>
+                <select id="imageFit">
+                  <option value="cover" selected>铺满裁切</option>
+                  <option value="contain">完整显示</option>
+                  <option value="stretch">拉伸</option>
+                </select>
+              </label>
+              <label class="check-row control-dither"><input id="imageDither" type="checkbox" checked> 抖动</label>
+              <label class="check-row control-invert"><input id="imageInvert" type="checkbox"> 反色</label>
+              <label class="control-threshold">
+                <span>阈值 <b id="imageThresholdValue">150</b></span>
+                <input id="imageThreshold" type="range" min="0" max="255" value="150">
+              </label>
+              <label class="control-edge-fade">
+                <span>边缘淡化 <b id="imageEdgeFadeValue">18</b>px</span>
+                <input id="imageEdgeFade" type="range" min="0" max="48" value="18">
+              </label>
+            </div>
+            <div class="image-preview-row">
+              <div class="canvas-pair preview-band">
+                <div><span>原图裁切</span><canvas id="imageSourceCanvas" width="220" height="208"></canvas></div>
+                <div><span>转换预览</span><canvas id="imagePreviewCanvas" width="220" height="208"></canvas></div>
+              </div>
+              <div class="image-side-panel">
+                <label>
+                  <span>预览图片</span>
+                  <select id="imagePreviewSelect" disabled>
+                    <option value="">尚未选择静图</option>
+                  </select>
+                </label>
+                <div class="asset-list" id="imageList">尚未选择静图。</div>
+              </div>
+            </div>
+            <div class="action-strip">
+              <button id="previewImagesBtn" class="primary-button" type="button">② 转换静图</button>
+              <button id="clearImagesBtn" class="secondary-button" type="button">清除静图</button>
+            </div>
+          </div>
+
+        </div>
+        <output id="assetResult" class="output-box">生成资源包后，可在资源写入页面写入设备。</output>
+      </section>
+
+      <section id="screens" class="tab-panel" aria-label="SDL 界面预览">
+        <div class="screen-gallery">
+          <figure><figcaption>天气时钟</figcaption><img src="./assets/screens/weather_clock_main.png" alt="天气时钟 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>天气看板</figcaption><img src="./assets/screens/weather_clock_weather_board.png" alt="天气看板 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>图片时钟</figcaption><img src="./assets/screens/weather_clock_gallery.png" alt="图片时钟 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>温湿时钟</figcaption><img src="./assets/screens/weather_clock_flip_clock.png" alt="温湿时钟 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>温湿历史</figcaption><img src="./assets/screens/weather_clock_history.png" alt="温湿历史 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>日历</figcaption><img src="./assets/screens/weather_clock_calendar.png" alt="日历 SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>小智 AI</figcaption><img src="./assets/screens/weather_clock_xiaozhi.png" alt="小智 AI SDL 预览" width="400" height="300"></figure>
+          <figure><figcaption>聚合时钟</figcaption><img src="./assets/screens/weather_clock_aggregate_clock.png" alt="聚合时钟 SDL 预览" width="400" height="300"></figure>
+        </div>
+      </section>
+
+      <section id="settings" class="tab-panel">
+        <div class="settings-grid">
+          <div class="asset-card settings-card">
+            <h2>天气城市兜底</h2>
+            <p class="card-note">仅填写城市名；设备 NVS 已保存手动城市时，会优先使用设备端配置。</p>
+            <label>
+              <span>天气城市（可选）</span>
+              <input id="customWeatherCity" type="text" maxlength="31" placeholder="例如：杭州">
+            </label>
+          </div>
+          <div class="asset-card settings-card">
+            <h2>OTA 清单兜底</h2>
+            <p class="card-note">留空时不写入；填写服务器基础地址会自动规范化到 /firmware/latest.json。</p>
+            <label>
+              <span>OTA 清单地址（可选）</span>
+              <input id="customOtaServer" type="url" placeholder="https://example.com 或 .../firmware/latest.json">
+            </label>
+          </div>
+        </div>
+        <output class="output-box">设置会随 custom_assets.bin 写入 assets 分区，只作为固件兜底配置，不改写 NVS。</output>
+      </section>
+
+      <section id="serial" class="tab-panel">
+        <div class="toolbar">
+          <label class="select-field">
+            <span>波特率</span>
+            <select id="baudRate">
+              <option value="115200" selected>115200</option>
+              <option value="230400">230400</option>
+              <option value="460800">460800</option>
+              <option value="921600">921600</option>
+            </select>
+          </label>
+          <button id="connectSerialBtn" class="primary-button" type="button">连接串口</button>
+          <button id="clearLogBtn" class="secondary-button" type="button">清空日志</button>
+          <button id="saveLogBtn" class="secondary-button" type="button">保存日志</button>
+        </div>
+        <div class="metrics">
+          <div><span>连接</span><strong id="serialState">未连接</strong></div>
+          <div><span>设备</span><strong id="serialDevice">未选择</strong></div>
+          <div><span>接收</span><strong id="rxBytes">0 B</strong></div>
+          <div><span>最近日志</span><strong id="lastLineTime">-</strong></div>
+        </div>
+        <pre id="serialLog" class="terminal" aria-live="polite">等待连接设备串口...</pre>
+        <form id="sendForm" class="send-row">
+          <input id="serialCommand" type="text" placeholder="输入串口命令，回车发送">
+          <button type="submit" class="primary-button">发送</button>
+        </form>
+      </section>
+
+      <section id="writer" class="tab-panel">
+        <div class="toolbar">
+          <label class="select-field">
+            <span>写入波特率</span>
+            <select id="assetBaudRate">
+              <option value="115200" selected>115200</option>
+              <option value="230400">230400</option>
+              <option value="460800">460800</option>
+              <option value="921600">921600</option>
+            </select>
+          </label>
+          <button id="selectAssetDeviceBtn" class="primary-button" type="button">① 选择并核对设备</button>
+          <button id="writeAssetsBtn" class="primary-button" type="button" disabled>② 串口写入资源</button>
+          <button id="eraseAssetsBtn" class="secondary-button" type="button" disabled>清空资源分区</button>
+        </div>
+        <div class="device-panel">
+          <div class="metrics writer-metrics">
+            <div><span>已选设备</span><strong id="assetDeviceName">未选择</strong></div>
+            <div><span>芯片</span><strong id="assetChipName">等待核对</strong></div>
+            <div><span>MAC</span><strong id="assetMacAddress">-</strong></div>
+            <div><span>分区核对</span><strong id="assetPartitionState">未核对</strong></div>
+          </div>
+          <div class="partition-table-wrap">
+            <table class="partition-table" aria-label="设备分区表">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>偏移</th>
+                  <th>大小</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="partitionTableBody">
+                <tr><td colspan="5">选择设备后读取分区表。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="progress-block">
+          <div class="progress-head"><span id="assetWriteState">等待资源包</span><strong id="assetWritePercent">0%</strong></div>
+          <progress id="assetWriteProgress" value="0" max="100"></progress>
+        </div>
+        <pre id="writeLog" class="terminal compact-terminal">生成资源包后，请先读取设备分区表，再写入设备 assets 分区。</pre>
+      </section>
+
+      <section id="firmware" class="tab-panel">
+        <div class="form-grid">
+          <label>
+            <span>① 固件来源</span>
+            <select id="firmwareSource">
+              <option value="remote" selected>GitHub Release</option>
+              <option value="local">自定义固件文件</option>
+            </select>
+          </label>
+          <label>
+            <span>① 选择在线固件</span>
+            <select id="remoteFirmwareSelect">
+              <option value="">正在加载固件清单</option>
+            </select>
+          </label>
+          <label class="wide-field file-picker">
+            <span>③ 选择自定义 bin 文件</span>
+            <input id="firmwareInput" type="file" accept=".bin,application/octet-stream" disabled>
+          </label>
+          <label>
+            <span>写入目标</span>
+            <select id="firmwareTarget">
+              <option value="merged" selected>0x0：完整 merged 固件</option>
+            </select>
+          </label>
+          <label>
+            <span>烧录波特率</span>
+            <select id="firmwareBaudRate">
+              <option value="115200" selected>115200</option>
+              <option value="230400">230400</option>
+              <option value="460800">460800</option>
+              <option value="921600">921600</option>
+            </select>
+          </label>
+        </div>
+        <div class="action-strip">
+          <button id="selectFirmwareDeviceBtn" class="secondary-button" type="button">② 选择并读取分区表</button>
+          <button id="refreshFirmwareBtn" class="secondary-button" type="button">刷新在线固件</button>
+          <button id="downloadFirmwareBtn" class="secondary-button" type="button">③ 下载并校验固件</button>
+          <button id="writeFirmwareBtn" class="primary-button" type="button" disabled>④ 串口烧录固件</button>
+        </div>
+        <div class="device-panel">
+          <div class="metrics writer-metrics">
+            <div><span>已选设备</span><strong id="firmwareDeviceName">未选择</strong></div>
+            <div><span>芯片</span><strong id="firmwareChipName">等待读取</strong></div>
+            <div><span>MAC</span><strong id="firmwareMacAddress">-</strong></div>
+            <div><span>App 分区</span><strong id="firmwarePartitionState">未读取</strong></div>
+          </div>
+          <div class="partition-table-wrap">
+            <table class="partition-table" aria-label="固件烧录分区表">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>偏移</th>
+                  <th>大小</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="firmwarePartitionTableBody">
+                <tr><td colspan="5">选择设备后读取分区表；App 写入只允许 ota_0 / ota_1。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="progress-block">
+          <div class="progress-head"><span id="firmwareWriteState">等待固件文件</span><strong id="firmwareWritePercent">0%</strong></div>
+          <progress id="firmwareWriteProgress" value="0" max="100"></progress>
+        </div>
+        <output id="flashResult" class="output-box">默认读取 GitHub Release 提供的最近版本固件。首次迁移到 v1.5.x 分区表时请使用完整 merged 固件写入 0x0。</output>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>

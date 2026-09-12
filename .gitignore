@@ -1,0 +1,5 @@
+# ESP-IDF build output
+RLCD_CLOCK/build/
+
+# 参考项目（本地参考，不推送到仓库）
+参考项目/
