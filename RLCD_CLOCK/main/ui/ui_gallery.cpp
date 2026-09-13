@@ -264,7 +264,7 @@ static void style_gallery_saying_label(lv_obj_t *label)
     if (!label) {
         return;
     }
-    lv_obj_set_style_text_font(label, &zh_font_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, get_cjk_font_with_supplement(), LV_PART_MAIN);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     gallery_attach_saying_rules(label);

@@ -215,6 +215,7 @@ idf_component_register(
         "assets/aggregate_numeric_20.c"
         "assets/zh_pomodoro_title_24.c"
         "assets/lv_font_simsun_16_supplement.c"
+        "assets/ui_fonts_shared.cpp"
     INCLUDE_DIRS
         "."
         "core"

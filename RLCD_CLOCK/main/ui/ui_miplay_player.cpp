@@ -121,22 +121,10 @@ lv_obj_t *s_idle_label = nullptr;
 lv_obj_t *s_spec_bars[kSpecBarCount] = {};   // 频谱条
 lv_obj_t *s_spec_peaks[kSpecBarCount] = {};  // peak hold 指示线
 
-// CJK fallback 字体链：zh_font_16 → 补丁(假名/韩文) → Montserrat
-// 必须用 RAM 副本，因为 flash const 不允许写 fallback 字段。
-static lv_font_t s_font_with_fallback;
-static lv_font_t s_supplement_ram;
-static bool s_fallback_ready = false;
-
+// CJK fallback 字体链（共享实现，见 ui_fonts_shared.cpp）
 static const lv_font_t *get_cjk_font()
 {
-    if (!s_fallback_ready) {
-        s_font_with_fallback = zh_font_16;
-        s_supplement_ram = lv_font_simsun_16_supplement;  // 拷贝到 RAM
-        s_supplement_ram.fallback = &lv_font_montserrat_12;
-        s_font_with_fallback.fallback = &s_supplement_ram;
-        s_fallback_ready = true;
-    }
-    return &s_font_with_fallback;
+    return get_cjk_font_with_supplement();
 }
 
 // 上次更新的值

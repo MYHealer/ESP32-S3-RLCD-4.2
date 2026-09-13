@@ -10,3 +10,7 @@ LV_FONT_DECLARE(zh_pomodoro_title_24);
 
 // 思源黑体 fallback 字体（4bpp，覆盖日文假名+韩文常用音节）
 LV_FONT_DECLARE(lv_font_simsun_16_supplement);
+
+// 共享 CJK fallback 链：zh_font_16 → supplement → montserrat
+// 使用 RAM 副本构建 fallback 指针链，避免写 flash const。
+const lv_font_t *get_cjk_font_with_supplement(void);
