@@ -67,10 +67,13 @@ extern "C" void lyric_bridge_on_meta_changed(const char *title, const char *arti
     if (!title || !title[0]) return;
 
     ESP_LOGI(kTag, "Meta changed: '%s' - '%s', triggering lyrics fetch", title, artist ? artist : "");
-    lyrics_fetch_async(title, artist ? artist : "", 0);
-    s_last_lyric_count = -1;   // 重置，允许重新推送
+    /* 先清除旧歌词，避免切歌间隙 lyrics_get_current_line 仍返回上一首末行 */
+    lyrics_clear();
+    miplay_lyric_clear();
+    s_last_lyric_count = -1;
     s_last_sync_pos_ms = -1;
     s_last_sync_index = -1;
+    lyrics_fetch_async(title, artist ? artist : "", 0);
 }
 
 // ── 公共 API：周期性调用（UI 刷新循环中，~500ms 一次）──
