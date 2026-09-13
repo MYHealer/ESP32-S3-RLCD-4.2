@@ -2,6 +2,7 @@
 #pragma once
 
 #include "ui_settings_contract.h"
+#include "work_page_ids.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -13,7 +14,7 @@ struct SettingsSecondaryStateSnapshot {
     bool all_day_chime_enabled;
     uint8_t volume_percent;
     uint8_t sound_index;
-    uint8_t work_page_enabled_mask;
+    WorkPageMask work_page_enabled_mask;
     bool alarm_enabled;
     uint8_t alarm_hour;
     uint8_t alarm_minute;

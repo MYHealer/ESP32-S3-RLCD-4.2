@@ -3,6 +3,7 @@
 
 #include "app_hardware.h"
 #include "app_metadata.h"
+#include "spectrum.h"
 #include "app_tick_time.h"
 #include "chime_runtime_state.h"
 #include "audio_power_lock_ownership.h"
@@ -21,6 +22,7 @@
 #include <esp_log.h>
 #include "driver/gpio.h"
 #include <freertos/FreeRTOS.h>
+#include <freertos/ringbuf.h>
 #include <freertos/task.h>
 
 #define AUDIO_IDLE_GPIO_CONFIG_FAILED_LOG_FORMAT "audio idle gpio config failed pin=%d err=%s"
@@ -489,4 +491,155 @@ void abort_xiaozhi_speaker_playback()
     finish_xiaozhi_speaker_stream();
     bool closed = close_xiaozhi_speaker_with_retry();
     ESP_LOGI(TAG, "xiaozhi speaker playback aborted: closed=%d", closed ? 1 : 0);
+}
+
+// ── MiPlay 投屏立体声音频 ──
+
+static bool s_miplay_session_active = false;
+static bool s_miplay_speaker_open = false;
+static int s_miplay_applied_volume = -1;
+static constexpr const char *kMiplayCodecName = "es8311";
+
+// Ring buffer 解耦：解码线程写入 ring buffer，独立任务阻塞写 I2S。
+// 32KB ≈ 85ms @48kHz/2ch/16bit，吸收 WiFi 抖动 + 解码延迟。
+static constexpr size_t kMiplayRingBufSize = 32 * 1024;
+static RingbufHandle_t s_miplay_ringbuf = nullptr;
+static TaskHandle_t s_miplay_out_task = nullptr;
+static volatile bool s_miplay_out_running = false;
+
+static void miplay_audio_out_task(void *)
+{
+    while (s_miplay_out_running) {
+        size_t item_size = 0;
+        void *item =
+            xRingbufferReceive(s_miplay_ringbuf, &item_size, pdMS_TO_TICKS(100));
+        if (!item) {
+            continue;
+        }
+        if (s_audio_codec && s_miplay_speaker_open) {
+            s_audio_codec->CodecPort_PlayWrite(item, item_size);
+        }
+        vRingbufferReturnItem(s_miplay_ringbuf, item);
+    }
+    vTaskDelete(nullptr);
+}
+
+void apply_codec_volume_direct(int volume_percent)
+{
+    if (volume_percent < 0) volume_percent = 0;
+    if (volume_percent > 100) volume_percent = 100;
+    if (!s_audio_codec) return;
+    s_audio_codec->CodecPort_SetSpeakerVol(volume_percent);
+}
+
+bool start_miplay_audio_session()
+{
+    if (s_miplay_session_active) {
+        return true;
+    }
+    if (!audio_try_mark_playing()) {
+        ESP_LOGW(TAG, "miplay audio session: codec busy");
+        return false;
+    }
+    CodecPort *codec = audio_prepare_codec_for_playback();
+    if (!codec) {
+        ESP_LOGW(TAG, "miplay audio session: codec init failed");
+        audio_finish_playback();
+        return false;
+    }
+    s_miplay_session_active = true;
+    s_miplay_speaker_open = false;
+    s_miplay_applied_volume = -1;
+
+    // 创建 ring buffer + 输出任务：解码线程不再被 I2S 阻塞。
+    s_miplay_ringbuf = xRingbufferCreate(kMiplayRingBufSize, RINGBUF_TYPE_BYTEBUF);
+    if (!s_miplay_ringbuf) {
+        ESP_LOGW(TAG, "miplay ringbuf alloc failed");
+        s_miplay_session_active = false;
+        audio_finish_playback();
+        return false;
+    }
+    s_miplay_out_running = true;
+    if (xTaskCreatePinnedToCore(miplay_audio_out_task, "miplay_ao", 4096,
+                                nullptr, 5, &s_miplay_out_task, 1) != pdPASS) {
+        ESP_LOGW(TAG, "miplay audio out task create failed");
+        s_miplay_out_running = false;
+        vRingbufferDelete(s_miplay_ringbuf);
+        s_miplay_ringbuf = nullptr;
+        s_miplay_session_active = false;
+        audio_finish_playback();
+        return false;
+    }
+    ESP_LOGI(TAG, "miplay audio session started (ringbuf=%uKB)", (unsigned)(kMiplayRingBufSize / 1024));
+    return true;
+}
+
+void stop_miplay_audio_session()
+{
+    if (!s_miplay_session_active) {
+        return;
+    }
+    // 停止输出任务，等它退出后再删 ring buffer。
+    s_miplay_out_running = false;
+    if (s_miplay_out_task) {
+        // 给任务时间退出（它可能阻塞在 xRingbufferReceive 100ms）。
+        vTaskDelay(pdMS_TO_TICKS(200));
+        s_miplay_out_task = nullptr;
+    }
+    if (s_miplay_ringbuf) {
+        vRingbufferDelete(s_miplay_ringbuf);
+        s_miplay_ringbuf = nullptr;
+    }
+    if (s_audio_codec && s_miplay_speaker_open) {
+        s_audio_codec->CodecPort_CloseSpeaker();
+    }
+    s_miplay_speaker_open = false;
+    s_miplay_applied_volume = -1;
+    s_miplay_session_active = false;
+    spectrum_reset();
+    audio_finish_playback();
+    ESP_LOGI(TAG, "miplay audio session stopped");
+}
+
+int write_stereo_speaker(const int16_t *stereo_samples, size_t frame_count,
+                         int sample_rate)
+{
+    if (!s_audio_codec || !stereo_samples || frame_count == 0 ||
+        !s_miplay_session_active) {
+        return ESP_FAIL;
+    }
+    // 打开或切换立体声扬声器。
+    if (!s_miplay_speaker_open) {
+        if (!s_audio_codec->CodecPort_SetInfo(kMiplayCodecName, 1,
+                                              sample_rate, 2, 16)) {
+            ESP_LOGW(TAG, "miplay stereo speaker open failed: rate=%d",
+                     sample_rate);
+            return ESP_FAIL;
+        }
+        s_miplay_speaker_open = true;
+        s_miplay_applied_volume = -1;
+        ESP_LOGI(TAG, "miplay stereo speaker opened: %d Hz", sample_rate);
+    }
+    // 音量同步：用对数曲线避免高音量削波（对齐参考项目 ALC 曲线）。
+    int vol = chime_runtime_volume_percent();
+    if (s_miplay_applied_volume != vol) {
+        // 二次曲线：vol=100→100, vol=50→77, vol=0→0
+        int curved = 100 - (100 - vol) * (100 - vol) / 100;
+        s_audio_codec->CodecPort_SetSpeakerVol(curved);
+        s_miplay_applied_volume = vol;
+    }
+    // 立体声 frame_count 是样本对数，bytes = frame_count * 2ch * 2bytes。
+    int bytes = static_cast<int>(frame_count * 2 * sizeof(int16_t));
+    // 频谱采样（轻量，只取最新 256 帧）
+    spectrum_push_samples(stereo_samples, frame_count);
+    // 写入 ring buffer（短超时），由 miplay_audio_out_task 独立写 I2S。
+    if (!s_miplay_ringbuf) {
+        return ESP_FAIL;
+    }
+    if (xRingbufferSend(s_miplay_ringbuf, stereo_samples, bytes,
+                        pdMS_TO_TICKS(20)) != pdTRUE) {
+        // ring buffer 满（输出任务来不及消费），丢弃本帧。
+        return 0;
+    }
+    return bytes;
 }

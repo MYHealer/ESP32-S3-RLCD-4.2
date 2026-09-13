@@ -103,7 +103,7 @@ bool commit_weather_snapshot(const WeatherData &next,
     time_t now = 0;
     time(&now);
     {
-        ScopedSemaphoreLock lock(s_weather_state_mutex);
+        ScopedSemaphoreLock lock(s_weather_state_mutex,pdMS_TO_TICKS(50));
         if (!lock) {
             return false;
         }
@@ -129,7 +129,7 @@ bool commit_basic_weather_snapshot(const WeatherData &next,
     time_t now = 0;
     time(&now);
     {
-        ScopedSemaphoreLock lock(s_weather_state_mutex);
+        ScopedSemaphoreLock lock(s_weather_state_mutex,pdMS_TO_TICKS(50));
         if (!lock) {
             return false;
         }
@@ -155,7 +155,7 @@ bool get_weather_full_snapshot(WeatherData *weather,
                                WeatherForecastData *forecast,
                                WeatherAirData *air)
 {
-    ScopedSemaphoreLock lock(s_weather_state_mutex);
+    ScopedSemaphoreLock lock(s_weather_state_mutex,pdMS_TO_TICKS(50));
     if (!lock) {
         return false;
     }
@@ -190,7 +190,7 @@ bool weather_cache_status_snapshot_load(WeatherCacheStatusSnapshot *out)
     if (!out) {
         return false;
     }
-    ScopedSemaphoreLock lock(s_weather_state_mutex);
+    ScopedSemaphoreLock lock(s_weather_state_mutex,pdMS_TO_TICKS(50));
     if (!lock) {
         return false;
     }
@@ -212,7 +212,7 @@ bool get_weather_alert_title_snapshot(int requested_index,
         return false;
     }
     title[0] = '\0';
-    ScopedSemaphoreLock lock(s_weather_state_mutex);
+    ScopedSemaphoreLock lock(s_weather_state_mutex,pdMS_TO_TICKS(50));
     if (!lock || !s_weather_store.alert.active ||
         s_weather_store.alert.count <= 0 ||
         s_weather_store.alert.count > kMaxWeatherAlerts) {

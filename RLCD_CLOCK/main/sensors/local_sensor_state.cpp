@@ -25,7 +25,7 @@ bool local_sensor_state_publish_sample(float temperature,
     if (state_changed) {
         *state_changed = false;
     }
-    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle());
+    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle(),pdMS_TO_TICKS(50));
     if (!lock) {
         return false;
     }
@@ -55,7 +55,7 @@ bool local_sensor_state_publish_unavailable(bool *state_changed)
     if (state_changed) {
         *state_changed = false;
     }
-    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle());
+    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle(),pdMS_TO_TICKS(50));
     if (!lock) {
         return false;
     }
@@ -76,7 +76,7 @@ bool local_sensor_state_snapshot_load(LocalSensorStateSnapshot *snapshot)
     if (!snapshot) {
         return false;
     }
-    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle());
+    ScopedSemaphoreLock lock(s_local_sensor_mutex.handle(),pdMS_TO_TICKS(50));
     if (!lock) {
         *snapshot = {};
         return false;

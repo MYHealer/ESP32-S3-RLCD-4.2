@@ -36,7 +36,7 @@
 #include <esp_log.h>
 
 namespace {
-constexpr uint8_t kAllWorkPageMask = static_cast<uint8_t>((1U << kWorkPageCount) - 1);
+constexpr WorkPageMask kAllWorkPageMask = static_cast<WorkPageMask>((1U << kWorkPageCount) - 1);
 constexpr int kSettingsFeedbackDefaultMs = 2500;
 constexpr int kSettingsFeedbackBusyMs = 2000;
 constexpr int kSettingsFeedbackSavedMs = 1800;
@@ -93,13 +93,13 @@ constexpr size_t kSettingsFeedbackTextSize = 32;
 #define FACTORY_RESET_REQUESTED_LOG "factory reset requested from settings"
 #define SYSTEM_INFO_REQUESTED_LOG "system info requested from settings"
 
-uint8_t toggled_work_page_mask(uint8_t current_mask, int page)
+WorkPageMask toggled_work_page_mask(WorkPageMask current_mask, int page)
 {
     if (!is_valid_work_page_id(page)) {
-        return static_cast<uint8_t>(current_mask & kAllWorkPageMask);
+        return current_mask & kAllWorkPageMask;
     }
-    uint8_t page_mask = static_cast<uint8_t>(1U << page);
-    return static_cast<uint8_t>((current_mask ^ page_mask) & kAllWorkPageMask);
+    WorkPageMask page_mask = static_cast<WorkPageMask>(1U << page);
+    return (current_mask ^ page_mask) & kAllWorkPageMask;
 }
 
 void set_formatted_settings_feedback(const char *format, ...)
@@ -176,8 +176,8 @@ void clear_inactive_settings_confirmation(int primary, int selected)
     }
 }
 
-static_assert(kWorkPageCount > 0 && kWorkPageCount <= 8,
-              "work page mask in settings UI is stored as uint8_t");
+static_assert(kWorkPageCount > 0 && kWorkPageCount <= 16,
+              "work page mask in settings UI is stored as WorkPageMask (uint16_t)");
 static_assert(kAllWorkPageMask != 0, "settings UI must have at least one work page bit");
 } // namespace
 
@@ -302,9 +302,9 @@ void handle_display_settings_action(
                                   kSettingsFeedbackDefaultMs);
             return;
         }
-        const uint8_t previous_mask = work_page_enabled_mask_load();
+        const WorkPageMask previous_mask = work_page_enabled_mask_load();
         const bool page_was_enabled =
-            (previous_mask & static_cast<uint8_t>(1U << page)) != 0;
+            (previous_mask & static_cast<WorkPageMask>(1U << page)) != 0;
         const bool page_will_be_enabled = !page_was_enabled;
         if (offline_mode_enabled_load() &&
             !page_was_enabled &&
@@ -312,7 +312,7 @@ void handle_display_settings_action(
             set_settings_feedback(kOfflinePageUnavailableFeedback, kSettingsFeedbackDefaultMs);
             return;
         }
-        const uint8_t next_mask = toggled_work_page_mask(previous_mask, page);
+        const WorkPageMask next_mask = toggled_work_page_mask(previous_mask, page);
         if (next_mask == 0) {
             set_settings_feedback(kLastWorkPageFeedback, kSettingsFeedbackDefaultMs);
             return;

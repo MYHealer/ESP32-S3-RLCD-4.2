@@ -7,3 +7,6 @@ LV_FONT_DECLARE(qweather_icons_36);
 LV_FONT_DECLARE(zh_font_16);
 LV_FONT_DECLARE(zh_flip_lunar_22);
 LV_FONT_DECLARE(zh_pomodoro_title_24);
+
+// 思源黑体 fallback 字体（4bpp，覆盖日文假名+韩文常用音节）
+LV_FONT_DECLARE(lv_font_simsun_16_supplement);

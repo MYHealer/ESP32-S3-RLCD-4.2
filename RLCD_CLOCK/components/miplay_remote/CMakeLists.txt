@@ -14,6 +14,7 @@ idf_component_register(
         "miplay_session.cpp"
         "miplay_safety.cpp"
         "miplay_control.cpp"
+        "miplay_media.cpp"
         "miplay_remote.cpp"
     INCLUDE_DIRS
         "include"
@@ -28,4 +29,5 @@ idf_component_register(
         esp_timer
         nvs_flash
     PRIV_REQUIRES
-        efuse)
+        efuse
+        esp_audio_codec)

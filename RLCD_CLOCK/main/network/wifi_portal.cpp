@@ -24,9 +24,14 @@
 
 #include "audio_services.h"
 #include "airkan_remote.h"
+#include "chime_runtime_state_internal.h"
 #include "miplay_remote.h"
+#include "miplay_media_state.h"
 #include "ui_task_notify.h"
 #include "xiaozhi_ai.h"
+#include "active_work_page_state_internal.h"
+#include "ui_work_page_catalog.h"
+#include "work_page_ids.h"
 
 #include <atomic>
 
@@ -1211,19 +1216,88 @@ static void wifi_event_handler(void *,
         //      configure_wifi_power_save 与 xiaozhi 的 PS 回退路径都会拦截
         //      WIFI_PS_MAX_MODEM（AP 缓存组播会让手机 mDNS 查询整条丢失）。
         // 这两项在服务常驻期间永不释放；Wi-Fi 重连重复进入此路径是安全的。
+        miplay_media_set_speaker_callback(write_stereo_speaker);
+        miplay_media_set_stream_callback([]() -> bool {
+            bool ok = start_miplay_audio_session();
+            if (ok) {
+                miplay_media_state_set(kMiPlayMediaPlaying);
+            }
+            return ok;
+        }, []() {
+            stop_miplay_audio_session();
+            miplay_media_state_set(kMiPlayMediaIdle);
+            miplay_remote_reset_connected();
+            miplay_media_clear();
+            if (active_work_page_load() == kWorkPageMiPlayPlayer) {
+                active_work_page_store(first_enabled_work_page());
+                notify_ui_task();
+                ESP_LOGI(TAG, "MiPlay stream ended -> return to home page");
+            }
+        });
+        miplay_remote_set_connection_callback([](bool connected) {
+            if (connected) {
+                // 强制启用播放页（仅内存态，不在 PSRAM 栈写 NVS）。
+                if (!is_work_page_enabled(kWorkPageMiPlayPlayer)) {
+                    force_enable_work_page_runtime(kWorkPageMiPlayPlayer);
+                }
+                active_work_page_store(kWorkPageMiPlayPlayer);
+                notify_ui_task();
+                ESP_LOGI(TAG, "MiPlay connected -> switch to player page");
+            } else if (active_work_page_load() == kWorkPageMiPlayPlayer) {
+                active_work_page_store(first_enabled_work_page());
+                notify_ui_task();
+                ESP_LOGI(TAG, "MiPlay disconnected -> return to home page");
+            }
+        });
+        // 音量统一：MiPlay 手机端调音量 → 走设备硬件音量 + NVS 持久化。
+        miplay_media_set_volume_callback(
+            [](int percent) {
+                if (percent < 0) percent = 0;
+                if (percent > 100) percent = 100;
+                if (chime_runtime_volume_percent() != percent) {
+                    chime_runtime_volume_percent_store(percent);
+                    apply_codec_volume_direct(percent);
+                    request_volume_save();
+                    notify_ui_task();
+                }
+            },
+            []() -> int { return chime_runtime_volume_percent(); });
+        // 元数据 → 歌词获取 + UI 更新。
+        miplay_media_set_meta_callback(
+            [](const char *title, const char *artist,
+               const char *album, int64_t duration_ms, int64_t position_ms) {
+                // 只在有标题时更新元数据（SET_POSITION 只传 position，
+                // 不应覆盖已有的 title/artist）。
+                if (title && title[0]) {
+                    miplay_media_meta_update(title, artist, album, duration_ms);
+                    // 收到元数据时确保状态为播放中（覆盖可能的 idle 残留）
+                    miplay_media_state_set(kMiPlayMediaPlaying);
+                    ESP_LOGI(TAG, "MiPlay meta: title='%s' artist='%s' dur=%lld",
+                             title, artist ? artist : "", (long long)duration_ms);
+                }
+                if (position_ms > 0) {
+                    miplay_media_position_update(position_ms);
+                }
+            });
+        // 暂停/恢复 → 更新 UI 状态。
+        miplay_media_set_pause_callback(
+            [](bool paused) {
+                miplay_media_state_set(paused ? kMiPlayMediaPaused : kMiPlayMediaPlaying);
+                ESP_LOGI(TAG, "MiPlay pause state: %s", paused ? "paused" : "playing");
+            });
         if (miplay_remote_start() == ESP_OK) {
             if (!network_awake_lock_active()) {
                 (void)acquire_network_awake_lock();
             }
-            if (!wifi_always_on_required()) {
-                set_discovery_services_power_policy(true);
-                const esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
-                if (ps_err == ESP_OK) {
-                    ESP_LOGI(TAG, "wifi power save disabled for MiPlay/airkan");
-                } else {
-                    ESP_LOGW(TAG, "wifi ps disable failed: %s",
-                             esp_err_to_name(ps_err));
-                }
+            set_discovery_services_power_policy(true);
+            // MiPlay 投屏必须禁用 WiFi 省电，否则射频休眠导致 RTP 包丢失→卡顿。
+            // 不受 wifi_always_on_required() 守卫：幂等调用，确保一定生效。
+            const esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
+            if (ps_err == ESP_OK) {
+                ESP_LOGI(TAG, "wifi power save disabled for MiPlay/airkan");
+            } else {
+                ESP_LOGW(TAG, "wifi ps disable failed: %s",
+                         esp_err_to_name(ps_err));
             }
         }
         // airkan 遥控（6095 认证 + 6091 遥控）同样需要 STA IP。

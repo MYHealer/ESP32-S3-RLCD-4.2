@@ -5,6 +5,7 @@
 #include "app_metadata.h"
 #include "app_runtime_timing.h"
 #include "app_tick_time.h"
+#include "audio_services.h"
 #include "battery_runtime_state.h"
 #include "network_diagnostics_state.h"
 #include "pomodoro_services.h"
@@ -105,7 +106,7 @@ TickType_t ui_runtime_next_loop_delay_ticks(time_t sampled_wall_second,
         (!minute_level_wait || battery_blink_visible)
             ? next_second_delay_ticks(sampled_wall_second)
             : 0;
-    uint32_t delay_candidates[4] = {};
+    uint32_t delay_candidates[5] = {};
     delay_candidates[0] = minute_level_wait
                               ? next_minute_delay_ticks(sampled_wall_second)
                               : second_delay_ticks;
@@ -131,6 +132,10 @@ TickType_t ui_runtime_next_loop_delay_ticks(time_t sampled_wall_second,
     }
     if (battery_blink_visible) {
         delay_candidates[3] = second_delay_ticks;
+    }
+    // 投屏播放音频时加速 UI 循环（200ms），让频谱跟手。
+    if (active_page == kWorkPageMiPlayPlayer && is_audio_playing()) {
+        delay_candidates[4] = pdMS_TO_TICKS(200);
     }
     return static_cast<TickType_t>(ui_shortest_delay_ticks(
         delay_candidates,

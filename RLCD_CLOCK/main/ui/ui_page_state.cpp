@@ -17,6 +17,7 @@
 #include "ui_work_page_catalog.h"
 #include "ui_work_pages.h"
 #include "ui_xiaozhi.h"
+#include "ui_miplay_player.h"
 #include "weather_state.h"
 #include "wifi_portal_state.h"
 #include "work_page_ids.h"
@@ -76,6 +77,9 @@ lv_obj_t *build_work_page_root(int page)
         break;
     case kWorkPageAggregateClock:
         build_aggregate_clock_page();
+        break;
+    case kWorkPageMiPlayPlayer:
+        build_miplay_player_page();
         break;
     default:
         return work_page_root(kFallbackWorkPage);

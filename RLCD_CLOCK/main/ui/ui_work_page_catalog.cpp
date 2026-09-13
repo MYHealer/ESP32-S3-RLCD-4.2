@@ -48,6 +48,7 @@ constexpr WorkPageDescriptor kWorkPageDescriptors[kWorkPageCount] = {
     {kWorkPageXiaozhiAI, "小智AI", kWorkPageTraitRequiresNetwork},
     {kWorkPageAggregateClock, "聚合时钟", kWorkPageTraitRequiresNetwork |
          kWorkPageTraitWeatherData | kWorkPageTraitExtendedWeatherData},
+    {kWorkPageMiPlayPlayer, "音乐播放", kWorkPageTraitRequiresNetwork},
 };
 
 constexpr uint8_t kDefaultWorkPageOrder[kWorkPageCount] = {
@@ -59,6 +60,7 @@ constexpr uint8_t kDefaultWorkPageOrder[kWorkPageCount] = {
     kWorkPageHistory,
     kWorkPageXiaozhiAI,
     kWorkPageAggregateClock,
+    kWorkPageMiPlayPlayer,
 };
 StaticTaskMutex s_work_page_order_mutex;
 uint8_t s_work_page_order[kWorkPageCount] = {
@@ -70,39 +72,40 @@ uint8_t s_work_page_order[kWorkPageCount] = {
     kWorkPageHistory,
     kWorkPageXiaozhiAI,
     kWorkPageAggregateClock,
+    kWorkPageMiPlayPlayer,
 };
 constexpr const char *kUnknownWorkPageName = "未知页面";
 
-constexpr uint8_t work_page_mask(int page)
+constexpr WorkPageMask work_page_mask(int page)
 {
-    return static_cast<uint8_t>(1U << page);
+    return static_cast<WorkPageMask>(1U << page);
 }
 
-constexpr uint8_t kAllWorkPageMask = static_cast<uint8_t>((1U << kWorkPageCount) - 1U);
-std::atomic<uint8_t> s_work_page_enabled_mask{kAllWorkPageMask};
+constexpr WorkPageMask kAllWorkPageMask = static_cast<WorkPageMask>((1U << kWorkPageCount) - 1U);
+std::atomic<WorkPageMask> s_work_page_enabled_mask{kAllWorkPageMask};
 
-constexpr uint8_t work_page_mask_for_trait(uint8_t trait)
+constexpr WorkPageMask work_page_mask_for_trait(uint8_t trait)
 {
     uint8_t mask = 0;
     for (const WorkPageDescriptor &descriptor : kWorkPageDescriptors) {
         if ((descriptor.traits & trait) != 0) {
-            mask = static_cast<uint8_t>(mask | work_page_mask(descriptor.page));
+            mask = static_cast<WorkPageMask>(mask | work_page_mask(descriptor.page));
         }
     }
     return mask;
 }
 
-constexpr uint8_t kNetworkWorkPageMask =
+constexpr WorkPageMask kNetworkWorkPageMask =
     work_page_mask_for_trait(kWorkPageTraitRequiresNetwork);
-constexpr uint8_t kLowRefreshIdleWorkPageMask =
+constexpr WorkPageMask kLowRefreshIdleWorkPageMask =
     work_page_mask_for_trait(kWorkPageTraitLowRefreshIdle);
-constexpr uint8_t kWeatherDataWorkPageMask =
+constexpr WorkPageMask kWeatherDataWorkPageMask =
     work_page_mask_for_trait(kWorkPageTraitWeatherData);
-constexpr uint8_t kDailySayingWorkPageMask =
+constexpr WorkPageMask kDailySayingWorkPageMask =
     work_page_mask_for_trait(kWorkPageTraitDailySaying);
-constexpr uint8_t kExtendedWeatherDataWorkPageMask =
+constexpr WorkPageMask kExtendedWeatherDataWorkPageMask =
     work_page_mask_for_trait(kWorkPageTraitExtendedWeatherData);
-constexpr uint8_t kLocalWorkPageMask = static_cast<uint8_t>(~kNetworkWorkPageMask) & kAllWorkPageMask;
+constexpr WorkPageMask kLocalWorkPageMask = static_cast<WorkPageMask>(~kNetworkWorkPageMask) & kAllWorkPageMask;
 
 constexpr bool work_page_descriptors_are_indexed_by_id()
 {
@@ -195,8 +198,8 @@ bool copy_normalized_work_page_order(uint8_t *order,
 static_assert(kFirstWorkPage == 0, "work page ids must start at zero");
 static_assert(kFallbackWorkPage == kWorkPageWeatherClock, "work page order fallback must remain weather clock");
 static_assert(kWorkPageCount > 0, "there must be at least one work page");
-static_assert(kWorkPageCount <= static_cast<int>(sizeof(uint8_t) * 8),
-              "work page enabled mask is stored as uint8_t");
+static_assert(kWorkPageCount <= static_cast<int>(sizeof(WorkPageMask) * 8),
+              "work page enabled mask must fit in WorkPageMask");
 static_assert(kLocalWorkPageMask != 0, "offline mode requires at least one local work page");
 static_assert((kLocalWorkPageMask & kNetworkWorkPageMask) == 0,
               "local and network work page masks must not overlap");
@@ -240,12 +243,12 @@ bool is_work_page_enabled(int page)
     return (work_page_enabled_mask_load() & work_page_mask(page)) != 0;
 }
 
-uint8_t work_page_enabled_mask_load()
+WorkPageMask work_page_enabled_mask_load()
 {
     return s_work_page_enabled_mask.load(std::memory_order_acquire);
 }
 
-void work_page_enabled_mask_store(uint8_t page_mask)
+void work_page_enabled_mask_store(WorkPageMask page_mask)
 {
     s_work_page_enabled_mask.store(page_mask, std::memory_order_release);
 }
@@ -272,9 +275,9 @@ WorkPageDataRequirements work_page_data_requirements(int page)
     };
 }
 
-WorkPageDataRequirements enabled_work_page_data_requirements(uint8_t page_mask)
+WorkPageDataRequirements enabled_work_page_data_requirements(WorkPageMask page_mask)
 {
-    page_mask = static_cast<uint8_t>(page_mask & kAllWorkPageMask);
+    page_mask = static_cast<WorkPageMask>(page_mask & kAllWorkPageMask);
     return {
         (page_mask & kWeatherDataWorkPageMask) != 0,
         (page_mask & kExtendedWeatherDataWorkPageMask) != 0,
@@ -283,7 +286,7 @@ WorkPageDataRequirements enabled_work_page_data_requirements(uint8_t page_mask)
     };
 }
 
-uint8_t normalize_work_page_enabled_mask(uint8_t page_mask)
+WorkPageMask normalize_work_page_enabled_mask(WorkPageMask page_mask)
 {
     page_mask &= kAllWorkPageMask;
     if (page_mask == 0) {
@@ -295,9 +298,9 @@ uint8_t normalize_work_page_enabled_mask(uint8_t page_mask)
     return page_mask;
 }
 
-uint8_t work_page_mask_for_offline_mode(uint8_t page_mask)
+WorkPageMask work_page_mask_for_offline_mode(WorkPageMask page_mask)
 {
-    uint8_t local_mask = static_cast<uint8_t>(page_mask & kLocalWorkPageMask);
+    WorkPageMask local_mask = static_cast<WorkPageMask>(page_mask & kLocalWorkPageMask);
     if (local_mask != 0) {
         return local_mask;
     }
@@ -323,7 +326,7 @@ const char *work_page_name(int page)
 
 int first_enabled_work_page()
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     uint8_t order[kWorkPageCount] = {};
     if (!copy_normalized_work_page_order(order, sizeof(order), page_mask)) {
         return kFallbackWorkPage;
@@ -348,7 +351,7 @@ void reset_work_page_order()
 
 void normalize_work_page_order()
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     ScopedSemaphoreLock lock(s_work_page_order_mutex.handle());
     if (!lock) {
         return;
@@ -360,7 +363,7 @@ void normalize_work_page_order()
                                       sizeof(kDefaultWorkPageOrder));
 }
 
-bool work_page_mask_has_valid_home(uint8_t page_mask)
+bool work_page_mask_has_valid_home(WorkPageMask page_mask)
 {
     return work_page_order_policy::mask_has_valid_home(page_mask);
 }
@@ -409,7 +412,7 @@ bool work_page_order_swapped_copy_preserving_home(int first_index,
                                                   uint8_t *order,
                                                   size_t order_size)
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     if (!copy_normalized_work_page_order(order, order_size, page_mask)) {
         return false;
     }
@@ -423,7 +426,7 @@ bool work_page_order_swapped_copy_preserving_home(int first_index,
 
 int next_enabled_work_page(int current_page)
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     uint8_t order[kWorkPageCount] = {};
     if (!copy_normalized_work_page_order(order, sizeof(order), page_mask)) {
         return kFallbackWorkPage;
@@ -446,7 +449,7 @@ int next_enabled_work_page(int current_page)
 
 int first_enabled_work_page_order_index()
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     uint8_t order[kWorkPageCount] = {};
     if (!copy_normalized_work_page_order(order, sizeof(order), page_mask)) {
         return 0;
@@ -458,7 +461,7 @@ int first_enabled_work_page_order_index()
 
 int next_enabled_work_page_order_index(int current_order_index)
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     uint8_t order[kWorkPageCount] = {};
     if (!copy_normalized_work_page_order(order, sizeof(order), page_mask)) {
         return 0;
@@ -475,7 +478,7 @@ int next_enabled_work_page_order_index(int current_order_index)
 
 int valid_enabled_work_page_order_index(int current_order_index)
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     uint8_t order[kWorkPageCount] = {};
     if (!copy_normalized_work_page_order(order, sizeof(order), page_mask)) {
         return 0;
@@ -489,4 +492,13 @@ void ensure_active_work_page_enabled()
     if (!is_work_page_enabled(active_work_page_load())) {
         active_work_page_store(first_enabled_work_page());
     }
+}
+
+void force_enable_work_page_runtime(int page)
+{
+    if (!work_page_order_policy::is_work_page(page)) {
+        return;
+    }
+    const auto bit = static_cast<WorkPageMask>(1U << page);
+    s_work_page_enabled_mask.fetch_or(bit, std::memory_order_relaxed);
 }

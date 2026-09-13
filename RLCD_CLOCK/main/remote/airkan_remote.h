@@ -28,6 +28,10 @@ void airkan_remote_stop(void);
 // 当前是否有手机处于可遥控状态（版本协商通过且连接建立）。
 bool airkan_remote_is_connected(void);
 
+// 请求将当前音量保存到 NVS。内部用单飞任务避免重复创建。
+// 可从任意上下文调用（PSRAM 栈安全——保存任务用内部 RAM 栈）。
+void request_volume_save(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -7,7 +7,11 @@
 #include "battery_runtime_state.h"
 #include "input_button_config.h"
 #include "input_button_wait_policy.h"
+#include "miplay_media_state.h"
 #include "network_diagnostics_state.h"
+#include "ui_miplay_player.h"
+#include "miplay_remote.h"
+#include "chime_runtime_state_internal.h"
 #include "network_sync_requests.h"
 #include "ota_services.h"
 #include "pomodoro_services.h"
@@ -222,6 +226,7 @@ void button_task(void *)
     bool key_press_opened_settings = false;
     bool key_long_handled = false;
     bool boot_press_stopped_alert = false;
+    bool boot_long_handled = false;
     bool key_press_stopped_alert = false;
 
     for (;;) {
@@ -232,11 +237,21 @@ void button_task(void *)
         if (boot_pressed) {
             if (boot_pressed_since == 0) {
                 boot_pressed_since = now;
+                boot_long_handled = false;
                 boot_press_stopped_alert = alarm_stop_ringing_from_button() ||
                                            pomodoro_stop_alert_from_button();
                 if (settings_page_requested()) {
                     settings_activity_record(now);
                 }
+            } else if (!boot_long_handled &&
+                       !boot_press_stopped_alert &&
+                       active_work_page_load() == kWorkPageMiPlayPlayer &&
+                       miplay_media_is_active() &&
+                       button_press_is_long(now - boot_pressed_since)) {
+                miplay_remote_next_track();
+                boot_long_handled = true;
+                ESP_LOGI(TAG, "boot long press: next track");
+                notify_ui_task();
             }
         } else {
             if (boot_pressed_since != 0 && boot_press_stopped_alert) {
@@ -255,15 +270,33 @@ void button_task(void *)
                        !setup_portal_active_load() &&
                        !battery_low_mode_load()) {
                 TickType_t held = now - boot_pressed_since;
-                if (button_press_is_short(held)) {
-                    int next_page = next_enabled_work_page(active_work_page_load());
-                    active_work_page_store(next_page);
-                    ESP_LOGI(TAG, BUTTON_SWITCH_WORK_PAGE_LOG_FORMAT, next_page + 1);
+                if (button_press_is_short(held) && !boot_long_handled) {
+                    // 投屏播放页面：BOOT 短按 = 音量+
+                    if (active_work_page_load() == kWorkPageMiPlayPlayer &&
+                        miplay_media_is_active()) {
+                        ESP_LOGI(TAG, "boot short: volume +5");
+                        miplay_remote_volume_step(+5);
+                        int cur = chime_runtime_volume_percent();
+                        chime_runtime_volume_percent_store(cur + 5 > 100 ? 100 : cur + 5);
+                    } else {
+                        int next_page = next_enabled_work_page(active_work_page_load());
+                        /* MiPlay 播放页只在投屏时出现，不在 BOOT 循环中。 */
+                        for (int guard = 0;
+                             guard < kWorkPageCount &&
+                             next_page == kWorkPageMiPlayPlayer &&
+                             !miplay_media_is_active();
+                             ++guard) {
+                            next_page = next_enabled_work_page(next_page);
+                        }
+                        active_work_page_store(next_page);
+                        ESP_LOGI(TAG, BUTTON_SWITCH_WORK_PAGE_LOG_FORMAT, next_page + 1);
+                    }
                     notify_ui_task();
                 }
             }
             boot_pressed_since = 0;
             boot_press_stopped_alert = false;
+            boot_long_handled = false;
         }
 
         if (key_pressed) {
@@ -278,11 +311,28 @@ void button_task(void *)
                 }
                 if (!key_press_stopped_alert &&
                     !settings_page_requested() && !info_page_requested() && !network_diag_page_requested()) {
-                    ESP_LOGI(TAG, BUTTON_SHOW_SETTINGS_LOG_FORMAT);
-                    enter_settings_primary_menu(now);
-                    key_press_opened_settings = true;
-                    notify_ui_task();
+                    if (active_work_page_load() == kWorkPageMiPlayPlayer &&
+                        miplay_media_is_active()) {
+                        // MiPlay：短按/长按延迟到释放或持续按住时处理
+                    } else {
+                        ESP_LOGI(TAG, BUTTON_SHOW_SETTINGS_LOG_FORMAT);
+                        enter_settings_primary_menu(now);
+                        key_press_opened_settings = true;
+                        notify_ui_task();
+                    }
                 }
+            } else if (!key_press_stopped_alert &&
+                       !key_press_opened_settings &&
+                       !key_long_handled &&
+                       active_work_page_load() == kWorkPageMiPlayPlayer &&
+                       miplay_media_is_active() &&
+                       !settings_page_requested() &&
+                       button_press_is_long(now - key_pressed_since)) {
+                // MiPlay：KEY 长按 = 上一首
+                miplay_remote_prev_track();
+                key_long_handled = true;
+                ESP_LOGI(TAG, "key long press: prev track");
+                notify_ui_task();
             } else if (!key_press_stopped_alert &&
                        !key_press_opened_settings &&
                        !key_long_handled &&
@@ -311,6 +361,21 @@ void button_task(void *)
                 notify_ui_task();
             }
         } else {
+            if (key_pressed_since != 0 &&
+                !key_press_stopped_alert && !key_long_handled &&
+                active_work_page_load() == kWorkPageMiPlayPlayer &&
+                miplay_media_is_active() &&
+                !settings_page_requested()) {
+                TickType_t held = now - key_pressed_since;
+                if (button_press_is_short(held)) {
+                    // MiPlay：KEY 短按 = 音量-
+                    ESP_LOGI(TAG, "key short: volume -5");
+                    miplay_remote_volume_step(-5);
+                    int cur = chime_runtime_volume_percent();
+                    chime_runtime_volume_percent_store(cur - 5 < 0 ? 0 : cur - 5);
+                    notify_ui_task();
+                }
+            }
             if (key_pressed_since != 0 &&
                 !key_press_stopped_alert &&
                 !key_press_opened_settings && !key_long_handled && settings_page_requested()) {

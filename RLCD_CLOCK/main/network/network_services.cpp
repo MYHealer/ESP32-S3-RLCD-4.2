@@ -93,7 +93,7 @@ static WorkPageDataRequirements capture_network_refresh_page_availability()
         work_page_enabled_mask_load());
 }
 
-static_assert(kWorkPageCount <= 8,
+static_assert(kWorkPageCount <= 16,
               "network refresh page snapshot must fit the enabled-page mask");
 
 static void finish_ntp_attempt(bool succeeded,

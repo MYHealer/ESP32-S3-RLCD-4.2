@@ -30,6 +30,14 @@ void miplay_control_stop(void);
 // 是否已建立会话（手机已连上并完成握手）。
 bool miplay_control_is_connected(void);
 
+// 重置连接状态为 false（媒体流结束后调用，允许下一次 CMD_OPEN_DEVICE
+// 重新触发连接回调）。不会断开控制通道。
+void miplay_control_reset_connected(void);
+
+// 注册连接状态变化回调。
+typedef void (*miplay_connection_changed_fn)(bool connected);
+void miplay_control_set_connection_callback(miplay_connection_changed_fn fn);
+
 #ifdef __cplusplus
 }
 #endif

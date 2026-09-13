@@ -173,11 +173,11 @@ static int _i2s_init(uint8_t port, esp_codec_dev_type_t dev_type, codec_init_cfg
     if (input == false && output == false) {
         return 0;
     }
-    // 所有音频方向统一使用已经由小智全双工链路验证的紧凑 DMA 参数。
-    // 普通提示音只创建 TX，避免恢复出厂配网首屏占用连续内存时又申请
-    // IDF 默认的大块 DMA 缓冲。
-    chan_cfg.dma_desc_num = 3;
-    chan_cfg.dma_frame_num = 64;
+    // I2S DMA 缓冲区：12×512=24KB，@48kHz 立体声覆盖 128ms。
+    // CodecPort_PlayWrite 在解码线程阻塞写入，DMA 满时暂停收包。
+    // 128ms 缓冲吸收 WiFi 抖动 + 解码延迟，参考项目用相同规格。
+    chan_cfg.dma_desc_num = 12;
+    chan_cfg.dma_frame_num = 512;
 #ifdef SOC_I2S_SUPPORTS_TDM
     i2s_tdm_slot_mask_t slot_mask = I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3;
     i2s_tdm_config_t tdm_cfg = {

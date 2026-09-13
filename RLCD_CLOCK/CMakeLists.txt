@@ -1,6 +1,6 @@
 # 配置天气时钟 ESP-IDF 工程版本、项目名和额外组件目录。
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "v1.6.4")
+set(PROJECT_VER "v1.6.5")
 # EXTRA_COMPONENT_DIRS 必须在 include(project.cmake) 之前设置：IDF 在那一步
 # 扫描组件目录，之后再改不生效。
 set(EXTRA_COMPONENT_DIRS

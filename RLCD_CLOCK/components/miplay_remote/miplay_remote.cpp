@@ -9,7 +9,10 @@
 #include "freertos/task.h"
 
 #include "miplay_control.h"
+#include "miplay_media.h"
+#include "miplay_proto.h"
 #include "miplay_remote_internal.h"
+#include "miplay_session.h"
 
 static const char *TAG = "miplay_remote";
 
@@ -155,4 +158,142 @@ void miplay_remote_stop(void)
 bool miplay_remote_is_connected(void)
 {
     return miplay_control_is_connected();
+}
+
+void miplay_remote_reset_connected(void)
+{
+    miplay_control_reset_connected();
+}
+
+void miplay_remote_set_connection_callback(miplay_connection_changed_fn fn)
+{
+    miplay_control_set_connection_callback(fn);
+}
+
+void miplay_media_set_volume_callback(miplay_volume_set_fn set_fn,
+                                       miplay_volume_get_fn get_fn)
+{
+    miplay_media_set_volume_cb(set_fn, get_fn);
+}
+
+void miplay_media_set_stream_callback(miplay_stream_start_fn start_fn,
+                                      miplay_stream_stop_fn stop_fn)
+{
+    miplay_media_set_stream_cb(start_fn, stop_fn);
+}
+
+void miplay_media_set_meta_callback(miplay_media_meta_fn fn)
+{
+    miplay_media_set_meta_cb(fn);
+}
+
+void miplay_media_set_pause_callback(miplay_media_pause_fn fn)
+{
+    miplay_media_set_pause_cb(fn);
+}
+
+// ── 反控命令 ──
+
+int miplay_remote_seek(int64_t target_ms)
+{
+    if (target_ms < 0) target_ms = 0;
+
+    if (!miplay_session_lock(200)) {
+        ESP_LOGW(TAG, "seek: session lock failed");
+        return -1;
+    }
+    miplay_session_t *s = miplay_session_get_active_locked();
+    miplay_session_unlock();
+    if (!s) {
+        ESP_LOGW(TAG, "seek: no active session");
+        return -1;
+    }
+
+    uint8_t payload[8];
+    int64_t v = target_ms;
+    for (int i = 7; i >= 0; i--) {
+        payload[i] = (uint8_t)(v & 0xFF);
+        v >>= 8;
+    }
+    int ret = miplay_send_encrypted_auto_seq(s, CMD_SET_POSITION,
+                                              payload, 8, nullptr);
+    ESP_LOGI(TAG, "seek -> %lld ms, ret=%d", (long long)target_ms, ret);
+    return ret == 0 ? 0 : -1;
+}
+
+// 发送 OPack 编码的 receiver_control_boolean（CMD_NOTIFY + key-xxx/bool）。
+// 格式对齐 FusionPlay：[key_len][key_bytes][0x00=bool][0x01=true]
+static int send_control_key(const char *action)
+{
+    if (!miplay_session_lock(200)) {
+        ESP_LOGW(TAG, "control key=%s: session lock failed", action);
+        return -1;
+    }
+    miplay_session_t *s = miplay_session_get_active_locked();
+    miplay_session_unlock();
+    if (!s) {
+        ESP_LOGW(TAG, "control key=%s: no active session", action);
+        return -1;
+    }
+
+    char key[16];
+    int klen = snprintf(key, sizeof(key), "key-%s", action);
+    if (klen <= 0 || klen > 15) return -1;
+
+    uint8_t body[20];
+    int o = 0;
+    body[o++] = (uint8_t)klen;
+    memcpy(body + o, key, klen); o += klen;
+    body[o++] = 0x00;  /* boolean type */
+    body[o++] = 0x01;  /* true */
+
+    int ret = miplay_send_encrypted_auto_seq(s, CMD_NOTIFY, body,
+                                              (uint32_t)o, nullptr);
+    ESP_LOGI(TAG, "receiver-control: %s cmd=0x%04X payload=%d ret=%d",
+             key, CMD_NOTIFY, o, ret);
+    return ret == 0 ? 0 : -1;
+}
+
+int miplay_remote_next_track(void)
+{
+    return send_control_key("next");
+}
+
+int miplay_remote_prev_track(void)
+{
+    return send_control_key("prev");
+}
+
+int miplay_remote_volume(uint32_t percent)
+{
+    if (percent > 100) percent = 100;
+
+    if (!miplay_session_lock(200)) return -1;
+    miplay_session_t *s = miplay_session_get_active_locked();
+    miplay_session_unlock();
+    if (!s) return -1;
+
+    uint8_t body[12];
+    body[0] = 0x06;  // key_len
+    memcpy(&body[1], "volume", 6);
+    body[7] = 0x07;  // value_type = u32
+    body[8] = (uint8_t)((percent >> 24) & 0xFF);
+    body[9] = (uint8_t)((percent >> 16) & 0xFF);
+    body[10] = (uint8_t)((percent >> 8) & 0xFF);
+    body[11] = (uint8_t)(percent & 0xFF);
+
+    int ret = miplay_send_encrypted_auto_seq(s, CMD_NOTIFY, body, 12, nullptr);
+    ESP_LOGI(TAG, "volume -> %u%%, ret=%d", (unsigned)percent, ret);
+    return ret == 0 ? 0 : -1;
+}
+
+#include "miplay_media.h"
+
+int miplay_remote_volume_step(int delta)
+{
+    uint32_t cur = miplay_media_get_volume();
+    int next = (int)cur + delta;
+    if (next < 0) next = 0;
+    if (next > 100) next = 100;
+    return miplay_remote_volume((uint32_t)next);
 }

@@ -171,6 +171,7 @@ idf_component_register(
         "sensors/sensor_services.cpp"
         "audio/audio_services.cpp"
         "audio/audio_chime.cpp"
+        "audio/spectrum.cpp"
         "alarm/alarm_replacement_policy.cpp"
         "alarm/alarm_storage.cpp"
         "alarm/reminder_schedule.cpp"
@@ -204,12 +205,16 @@ idf_component_register(
         "xiaozhi/xiaozhi_websocket_session.cpp"
         "input/input_tasks.cpp"
         "remote/airkan_remote.cpp"
+        "miplay/miplay_media_state.cpp"
+        "miplay/lyric_bridge.cpp"
+        "ui/ui_miplay_player.cpp"
         "assets/boot_anim.c"
         "assets/qweather_icons_36.c"
         "assets/zh_font_16.c"
         "assets/zh_flip_lunar_22.c"
         "assets/aggregate_numeric_20.c"
         "assets/zh_pomodoro_title_24.c"
+        "assets/lv_font_simsun_16_supplement.c"
     INCLUDE_DIRS
         "."
         "core"
@@ -223,12 +228,14 @@ idf_component_register(
         "xiaozhi"
         "input"
         "remote"
+        "miplay"
         "storage"
         "assets"
     REQUIRES
         app_bsp
         port_bsp
         miplay_remote
+        lyrics_fetch
         # SDK 目录名是 airkan-sdk，IDF 以目录名作组件名，故此处必须带后缀。
         airkan-sdk
         lvgl__lvgl
@@ -253,3 +260,4 @@ idf_component_register(
 
 string(TIMESTAMP WEATHER_CLOCK_BUILD_DATE "%Y-%m-%d")
 target_compile_definitions(${COMPONENT_LIB} PRIVATE WEATHER_CLOCK_BUILD_DATE="${WEATHER_CLOCK_BUILD_DATE}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE=1)

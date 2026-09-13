@@ -124,6 +124,16 @@ miplay_session_t *miplay_session_find_locked(int sock)
     return nullptr;
 }
 
+miplay_session_t *miplay_session_get_active_locked(void)
+{
+    for (size_t i = 0; i < MIPLAY_MAX_CONTROL_SESSIONS; i++) {
+        if (s_sessions[i].in_use && s_sessions[i].reverse_control_ready) {
+            return &s_sessions[i];
+        }
+    }
+    return nullptr;
+}
+
 uint16_t miplay_next_notify_seq(miplay_session_t *session)
 {
     if (!session) {

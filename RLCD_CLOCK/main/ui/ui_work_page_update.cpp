@@ -14,6 +14,7 @@
 #include "ui_work_pages.h"
 #include "ui_work_status.h"
 #include "ui_xiaozhi.h"
+#include "ui_miplay_player.h"
 #include "weather_state.h"
 #include "work_page_ids.h"
 
@@ -45,6 +46,9 @@ bool update_visible_work_page_body(const struct tm &local,
     }
     if (state.xiaozhi) {
         changed |= update_xiaozhi_page(local);
+    }
+    if (state.miplay_player) {
+        changed |= update_miplay_player_page(local);
     }
     return changed;
 }

@@ -8,9 +8,9 @@
 namespace work_page_order_policy {
 namespace {
 
-constexpr uint8_t page_mask(int page)
+constexpr WorkPageMask page_mask(int page)
 {
-    return static_cast<uint8_t>(1U << page);
+    return static_cast<WorkPageMask>(1U << page);
 }
 
 bool order_buffer_is_valid(const uint8_t *order, size_t order_size)
@@ -56,13 +56,13 @@ bool order_is_valid(const uint8_t *order, size_t order_size)
     return true;
 }
 
-bool page_is_enabled(int page, uint8_t page_mask_value)
+bool page_is_enabled(int page, WorkPageMask page_mask_value)
 {
     return is_work_page(page) &&
            (page_mask_value & page_mask(page)) != 0;
 }
 
-bool mask_has_valid_home(uint8_t page_mask_value)
+bool mask_has_valid_home(WorkPageMask page_mask_value)
 {
     for (int page = kWorkPageWeatherClock; page < kWorkPageCount; ++page) {
         if (page != kWorkPageXiaozhiAI &&
@@ -75,7 +75,7 @@ bool mask_has_valid_home(uint8_t page_mask_value)
 
 bool order_has_valid_home(const uint8_t *order,
                           size_t order_size,
-                          uint8_t page_mask_value)
+                          WorkPageMask page_mask_value)
 {
     if (!order_is_valid(order, order_size)) {
         return false;
@@ -88,7 +88,7 @@ bool order_has_valid_home(const uint8_t *order,
 
 bool swap_entries_preserving_home(uint8_t *order,
                                   size_t order_size,
-                                  uint8_t page_mask_value,
+                                  WorkPageMask page_mask_value,
                                   int first_index,
                                   int second_index)
 {
@@ -123,7 +123,7 @@ int index_of(const uint8_t *order, size_t order_size, int page)
 
 int first_enabled_index(const uint8_t *order,
                         size_t order_size,
-                        uint8_t page_mask_value)
+                        WorkPageMask page_mask_value)
 {
     if (!order_buffer_is_valid(order, order_size)) {
         return kInvalidIndex;
@@ -138,7 +138,7 @@ int first_enabled_index(const uint8_t *order,
 
 int next_enabled_index(const uint8_t *order,
                        size_t order_size,
-                       uint8_t page_mask_value,
+                       WorkPageMask page_mask_value,
                        int current_order_index)
 {
     if (!order_buffer_is_valid(order, order_size)) {
@@ -155,7 +155,7 @@ int next_enabled_index(const uint8_t *order,
 
 int valid_enabled_index(const uint8_t *order,
                         size_t order_size,
-                        uint8_t page_mask_value,
+                        WorkPageMask page_mask_value,
                         int current_order_index)
 {
     if (order_buffer_is_valid(order, order_size) &&
@@ -169,7 +169,7 @@ int valid_enabled_index(const uint8_t *order,
 
 bool normalize(uint8_t *order,
                size_t order_size,
-               uint8_t page_mask_value,
+               WorkPageMask page_mask_value,
                const uint8_t *default_order,
                size_t default_order_size)
 {

@@ -64,9 +64,9 @@ static_assert(sizeof(SettingsRenderWorkspace) ==
               "settings render workspace must contain only secondary text storage");
 static_assert(sizeof(SettingsRenderCache) <= 48,
               "settings render cache must remain a compact UI-only state");
-static_assert(kWorkPageCount <= 8,
-              "settings switch snapshot stores the work-page mask in one byte");
-static_assert(sizeof(SettingsSecondaryStateSnapshot) <= 12,
+static_assert(kWorkPageCount <= 16,
+              "settings switch snapshot stores the work-page mask in two bytes");
+static_assert(sizeof(SettingsSecondaryStateSnapshot) <= 16,
               "settings secondary snapshot must remain lightweight");
 
 SettingsSecondaryStateSnapshot settings_secondary_state_snapshot(
@@ -104,7 +104,7 @@ bool work_page_enabled_in_switch_snapshot(
         return false;
     }
     return (snapshot.work_page_enabled_mask &
-            static_cast<uint8_t>(1U << page)) != 0;
+            static_cast<WorkPageMask>(1U << page)) != 0;
 }
 
 int collect_visible_work_page_order(int *indices,

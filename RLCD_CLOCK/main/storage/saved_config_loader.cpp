@@ -43,15 +43,15 @@ using network_config_keys::kXiaozhiAutoReturnKey;
 using network_config_keys::kGalleryRotationKey;
 
 namespace {
-constexpr uint8_t work_page_mask_bit(int page)
+constexpr WorkPageMask work_page_mask_bit(int page)
 {
-    return static_cast<uint8_t>(1U << page);
+    return static_cast<WorkPageMask>(1U << page);
 }
 
 constexpr uint8_t kPageMaskV4KnownBits = network_page_storage::kLegacyV4KnownPageMask;
-constexpr uint8_t kPageMaskV5KnownBits = network_page_storage::kCurrentKnownPageMask;
-constexpr uint8_t kWeatherBoardPageMask = work_page_mask_bit(kWorkPageWeatherBoard);
-constexpr uint8_t kFlipClockPageMask = work_page_mask_bit(kWorkPageFlipClock);
+constexpr WorkPageMask kPageMaskV5KnownBits = network_page_storage::kCurrentKnownPageMask;
+constexpr WorkPageMask kWeatherBoardPageMask = work_page_mask_bit(kWorkPageWeatherBoard);
+constexpr WorkPageMask kFlipClockPageMask = work_page_mask_bit(kWorkPageFlipClock);
 constexpr const char *kNvsActionLoadingConfig = "loading config";
 constexpr const char *kOfflinePageMaskPersistFailedLog =
     "failed to persist offline-compatible page settings";
@@ -73,7 +73,7 @@ struct LoadedSavedConfig {
     uint8_t all_day;
     uint8_t volume;
     uint8_t sound;
-    uint8_t page_mask;
+    WorkPageMask page_mask;
     uint8_t offline;
     uint8_t xiaozhi_auto_return;
     uint8_t gallery_rotation;
@@ -84,10 +84,10 @@ struct LoadedSavedConfig {
 };
 EXT_RAM_BSS_ATTR LoadedSavedConfig s_loaded_saved_config_workspace;
 
-static_assert(kWorkPageCount <= 8, "work page enabled mask is stored as uint8_t");
+static_assert(kWorkPageCount <= 16, "work page enabled mask is stored as WorkPageMask (uint16_t)");
 static_assert((kPageMaskV4KnownBits & work_page_mask_bit(kWorkPageXiaozhiAI)) == 0,
               "page mask v4 must not include Xiaozhi AI page");
-static_assert(kPageMaskV5KnownBits == static_cast<uint8_t>((1U << kWorkPageCount) - 1U),
+static_assert(kPageMaskV5KnownBits == static_cast<WorkPageMask>((1U << kWorkPageCount) - 1U),
               "page mask v5 must cover every current work page");
 static_assert((kPageMaskV5KnownBits & kWeatherBoardPageMask) == kWeatherBoardPageMask,
               "weather board page must be covered by the current page mask");
@@ -112,7 +112,7 @@ bool apply_loaded_page_config(uint8_t page_mask,
                               const uint8_t *page_order,
                               bool have_page_order)
 {
-    const uint8_t online_mask = normalize_work_page_enabled_mask(page_mask);
+    const WorkPageMask online_mask = normalize_work_page_enabled_mask(page_mask);
     work_page_enabled_mask_store(online_mask);
     if (have_page_order && page_order) {
         work_page_order_replace(page_order, kWorkPageCount);

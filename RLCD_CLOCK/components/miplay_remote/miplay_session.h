@@ -68,6 +68,10 @@ void miplay_session_release(miplay_session_t *session);
 // 按 socket 查找会话。调用者需持有会话互斥锁（见 miplay_session_lock）。
 miplay_session_t *miplay_session_find_locked(int sock);
 
+// 获取第一个活跃且反控就绪的会话。调用者需持有会话互斥锁。
+// 返回 NULL 表示无可用会话。
+miplay_session_t *miplay_session_get_active_locked(void);
+
 // 会话表互斥。所有对 s_sessions 的读写都必须在其保护下进行。
 bool miplay_session_lock(uint32_t timeout_ms);
 void miplay_session_unlock(void);

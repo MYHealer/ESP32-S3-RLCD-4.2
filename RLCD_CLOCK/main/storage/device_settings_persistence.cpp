@@ -18,6 +18,7 @@ using network_config_nvs::commit_nvs_if_changed;
 using network_config_nvs::ScopedNvsHandle;
 using network_config_nvs::write_changed_nvs_u8;
 using network_page_storage::kPageMaskV6Key;
+using network_page_storage::kPageMaskV7Key;
 using network_page_storage::write_work_page_order_nvs;
 using network_config_keys::kXiaozhiAutoReturnKey;
 using network_config_keys::kGalleryRotationKey;
@@ -84,6 +85,33 @@ bool save_changed_u8_setting(const char *action,
     }
     return true;
 }
+
+bool save_changed_u16_setting(const char *action,
+                              const char *failure_context,
+                              const char *key,
+                              uint16_t value)
+{
+    ScopedNvsHandle nvs;
+    esp_err_t err = nvs.open(NVS_READWRITE, action);
+    if (err != ESP_OK) {
+        return false;
+    }
+    uint16_t existing = 0;
+    bool changed = false;
+    if (nvs_get_u16(nvs.get(), key, &existing) != ESP_OK || existing != value) {
+        err = nvs_set_u16(nvs.get(), key, value);
+        if (err == ESP_OK) {
+            changed = true;
+        }
+    }
+    err = commit_nvs_if_changed(nvs.get(), err, changed);
+    if (!nvs.close_save_ok(err)) {
+        ESP_LOGW(TAG, "save u16 %s failed: %s", failure_context,
+                 esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 bool save_hourly_chime_setting()
@@ -100,13 +128,13 @@ bool set_chime_setting(const ChimeRuntimeSnapshot &settings)
     return true;
 }
 
-bool set_work_page_enabled_mask_setting(uint8_t page_mask)
+bool set_work_page_enabled_mask_setting(WorkPageMask page_mask)
 {
-    const uint8_t mask = normalize_work_page_enabled_mask(page_mask);
-    if (!save_changed_u8_setting(kNvsActionSavingPageSettings,
-                                 kNvsFailureContextPageSettings,
-                                 kPageMaskV6Key,
-                                 mask)) {
+    const WorkPageMask mask = normalize_work_page_enabled_mask(page_mask);
+    if (!save_changed_u16_setting(kNvsActionSavingPageSettings,
+                                  kNvsFailureContextPageSettings,
+                                  kPageMaskV7Key,
+                                  static_cast<uint16_t>(mask))) {
         return false;
     }
     work_page_enabled_mask_store(mask);
@@ -116,7 +144,7 @@ bool set_work_page_enabled_mask_setting(uint8_t page_mask)
 bool set_work_page_order_setting(const uint8_t *page_order,
                                  size_t page_order_size)
 {
-    const uint8_t page_mask = work_page_enabled_mask_load();
+    const WorkPageMask page_mask = work_page_enabled_mask_load();
     if (!work_page_order_policy::order_is_valid(page_order, page_order_size) ||
         !work_page_order_policy::order_has_valid_home(
             page_order, page_order_size, page_mask)) {

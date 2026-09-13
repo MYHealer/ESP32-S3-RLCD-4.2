@@ -108,8 +108,8 @@ bool set_offline_mode_enabled(bool enabled)
         return false;
     }
     uint8_t next_value = bool_to_nvs_u8(enabled);
-    const uint8_t current_page_mask = work_page_enabled_mask_load();
-    uint8_t next_page_mask = enabled
+    const WorkPageMask current_page_mask = work_page_enabled_mask_load();
+    WorkPageMask next_page_mask = enabled
                                  ? work_page_mask_for_offline_mode(current_page_mask)
                                  : current_page_mask;
     bool offline_changed = false;

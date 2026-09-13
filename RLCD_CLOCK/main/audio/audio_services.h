@@ -37,3 +37,10 @@ bool resume_xiaozhi_microphone_after_playback();
 bool play_xiaozhi_wake_feedback();
 void smooth_xiaozhi_speaker_segment_transition();
 void abort_xiaozhi_speaker_playback();
+
+// MiPlay 投屏音频会话：独立于小智会话，使用立体声输出。
+bool start_miplay_audio_session();
+void stop_miplay_audio_session();
+int write_stereo_speaker(const int16_t *stereo_samples, size_t frame_count, int sample_rate);
+// 直接设置 codec 音量（不检查会话状态）。
+void apply_codec_volume_direct(int volume_percent);

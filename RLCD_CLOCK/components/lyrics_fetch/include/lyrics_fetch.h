@@ -1,0 +1,82 @@
+/*
+ * 多源歌词获取 — 网易云 → QQ 音乐 → 酷我 回退链
+ *
+ * 流程：歌名+歌手 → 依次尝试三源 → LRC 可用性校验 → 解析时间戳
+ * 网易云: jsmn JSON 解析; QQ/酷我: 轻量字符串提取
+ */
+#pragma once
+
+#include "esp_err.h"
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define LYRIC_MAX_LINES    128        /* 最大歌词行数 */
+#define LYRIC_TEXT_LEN      64        /* 每行最大字符 */
+
+typedef struct {
+    int  time_ms;                      /* 时间戳（毫秒） */
+    char text[LYRIC_TEXT_LEN];         /* 歌词文本 */
+} lyric_line_t;
+
+typedef struct {
+    lyric_line_t lines[LYRIC_MAX_LINES];
+    int  count;                        /* 有效行数 */
+    bool loaded;                       /* 是否已加载 */
+    char song_name[64];                /* 当前歌曲名（缓存 key） */
+    char artist[64];                   /* 当前歌手（缓存 key） */
+    unsigned long known_song_id;       /* 已知 songId（>0 跳过搜索） */
+} lyric_data_t;
+
+/**
+ * @brief 初始化歌词组件
+ */
+esp_err_t lyrics_init(void);
+
+/**
+ * @brief 异步获取歌词（会创建后台任务）
+ * @param title    歌曲名
+ * @param artist   歌手名
+ * @param song_id  网易云 songId（>0 时跳过搜索，直接获取歌词）
+ */
+void lyrics_fetch_async(const char *title, const char *artist, unsigned long song_id);
+
+/**
+ * @brief 根据播放位置获取当前歌词行索引
+ * @param position_ms 当前播放位置（毫秒）
+ * @return 歌词行索引，-1 表示无歌词或未加载
+ */
+int lyrics_get_current_line(int position_ms);
+
+/**
+ * @brief 获取 klyric 逐字高亮进度（0-100），-1 表示无 klyric 数据
+ * @param line_start_ms 当前行起始时间（毫秒），来自 LRC time_ms
+ * @param pos_ms        当前播放位置（毫秒）
+ * @return 高亮进度百分比，-1 表示无 klyric
+ */
+int lyrics_get_karaoke_progress(int line_start_ms, int pos_ms);
+
+/**
+ * @brief 获取逐字高亮的字节偏移（精确到当前字）
+ * @param line_idx      当前 LRC 行索引
+ * @param line_text     当前 LRC 行文本
+ * @param pos_ms        当前播放位置（毫秒）
+ * @return 当前字在 line_text 中的字节偏移，-1 表示无数据
+ */
+int lyrics_get_karaoke_byte_idx(int line_idx, const char *line_text, int pos_ms);
+
+/**
+ * @brief 获取歌词数据（只读指针）
+ */
+const lyric_data_t *lyrics_get_data(void);
+
+/**
+ * @brief 清除歌词缓存（切歌时调用）
+ */
+void lyrics_clear(void);
+
+#ifdef __cplusplus
+}
+#endif

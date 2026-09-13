@@ -147,18 +147,8 @@ void volume_save_task(void *)
     vTaskDelete(nullptr);
 }
 
-void request_volume_save()
-{
-    if (!s_volume_save_gate.try_acquire()) {
-        return;  // 已有保存任务在跑，本次变更会被它一并落盘
-    }
-    // 内部 RAM 栈：flash 操作期间必须可访问，不能走 PSRAM 栈。
-    if (xTaskCreate(volume_save_task, "ak_vol_save", 3072, nullptr,
-                    kTaskPriority, nullptr) != pdPASS) {
-        ESP_LOGW(kTag, "volume save task create failed");
-        s_volume_save_gate.release();
-    }
-}
+// request_volume_save 移到匿名 namespace 外（line 425 之后），使其具有
+// C 链接可见性，供 wifi_portal.cpp 的 MiPlay 音量回调调用。
 
 void step_remote_volume(int direction)
 {
@@ -173,7 +163,7 @@ void step_remote_volume(int direction)
         return;
     }
     chime_runtime_volume_percent_store(target);
-    apply_xiaozhi_speaker_volume(target);
+    apply_codec_volume_direct(target);
     request_volume_save();
     // notify_ui_task() 不可省：UI 任务阻塞在 ulTaskNotifyTake 上，不唤醒它
     // 就不会走 update_settings_page()，表现为"声音界面按音量键数值不变，
@@ -423,6 +413,19 @@ bool create_service_task(TaskFunction_t fn, const char *name, void *arg)
 }
 
 }  // namespace
+
+void request_volume_save()
+{
+    if (!s_volume_save_gate.try_acquire()) {
+        return;  // 已有保存任务在跑，本次变更会被它一并落盘
+    }
+    // 内部 RAM 栈：flash 操作期间必须可访问，不能走 PSRAM 栈。
+    if (xTaskCreate(volume_save_task, "ak_vol_save", 3072, nullptr,
+                    kTaskPriority, nullptr) != pdPASS) {
+        ESP_LOGW(kTag, "volume save task create failed");
+        s_volume_save_gate.release();
+    }
+}
 
 esp_err_t airkan_remote_start(void)
 {

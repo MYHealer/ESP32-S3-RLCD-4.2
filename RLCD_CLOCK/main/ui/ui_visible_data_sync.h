@@ -18,6 +18,7 @@ struct ActiveWorkPageState {
     bool xiaozhi = false;
     bool weather_clock = false;
     bool aggregate_clock = false;
+    bool miplay_player = false;
     bool uses_weather_data = false;
     bool uses_extended_weather_data = false;
     bool uses_daily_saying = false;

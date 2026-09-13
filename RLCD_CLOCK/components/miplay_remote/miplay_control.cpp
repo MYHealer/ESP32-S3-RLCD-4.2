@@ -26,6 +26,7 @@
 #include "miplay_remote_internal.h"
 #include "miplay_safety.h"
 #include "miplay_session.h"
+#include "miplay_media.h"
 
 namespace {
 constexpr char kTag[] = "miplay_ctrl";
@@ -42,6 +43,14 @@ int s_listen_sock = -1;
 TaskHandle_t s_listen_task = nullptr;
 volatile bool s_control_running = false;
 volatile bool s_connected = false;
+miplay_connection_changed_fn s_conn_cb = nullptr;
+
+void set_connected(bool val)
+{
+    if (s_connected == val) return;
+    s_connected = val;
+    if (s_conn_cb) s_conn_cb(val);
+}
 
 // ── 基础工具 ──
 
@@ -270,6 +279,66 @@ int build_empty_media_info_ex(uint8_t *data, size_t capacity)
     return static_cast<int>(off);
 }
 
+// ── OPack 字段解析（SET_MEDIA_INFO 0x12 用）──
+//
+// 手机推来的 SET_MEDIA_INFO payload 是 OPack 编码的键值对集合。
+// 格式与 build_empty_media_info_ex 写出的对称：
+//   keyLen(1) + key(N) + valueType(1) + valueLen(2 BE) + value(N)
+// valueType: 0x04=string, 0x07=u32, 0x09=u64
+
+struct OPackField {
+    const uint8_t *value;
+    size_t value_len;
+    uint8_t type;
+};
+
+bool opack_find_field(const uint8_t *data, size_t len,
+                      const char *key, OPackField *out)
+{
+    const size_t klen = strlen(key);
+    size_t off = 0;
+    while (off + 1 < len) {
+        uint8_t field_key_len = data[off++];
+        if (off + field_key_len > len) break;
+        if (off + field_key_len + 3 > len) break;
+        const uint8_t *field_key = data + off;
+        off += field_key_len;
+        uint8_t type = data[off++];
+        uint16_t vlen = (static_cast<uint16_t>(data[off]) << 8) | data[off + 1];
+        off += 2;
+        if (off + vlen > len) break;
+        if (field_key_len == klen && memcmp(field_key, key, klen) == 0) {
+            out->value = data + off;
+            out->value_len = vlen;
+            out->type = type;
+            return true;
+        }
+        off += vlen;
+    }
+    return false;
+}
+
+void opack_field_to_str(const OPackField &f, char *buf, size_t buf_size)
+{
+    if (f.type == 0x04) {
+        size_t cplen = f.value_len < buf_size - 1 ? f.value_len : buf_size - 1;
+        memcpy(buf, f.value, cplen);
+        buf[cplen] = '\0';
+    } else if (f.type == 0x07 && f.value_len >= 4) {
+        uint32_t v = (static_cast<uint32_t>(f.value[0]) << 24) |
+                     (static_cast<uint32_t>(f.value[1]) << 16) |
+                     (static_cast<uint32_t>(f.value[2]) << 8) |
+                     f.value[3];
+        snprintf(buf, buf_size, "%lu", (unsigned long)v);
+    } else if (f.type == 0x09 && f.value_len >= 8) {
+        uint64_t v = 0;
+        for (int i = 0; i < 8; i++) v = (v << 8) | f.value[i];
+        snprintf(buf, buf_size, "%llu", (unsigned long long)v);
+    } else {
+        buf[0] = '\0';
+    }
+}
+
 }  // namespace
 
 // ── 握手命令处理 ──
@@ -296,6 +365,27 @@ int send_maybe_encrypted(miplay_session_t *session, uint16_t cmd, uint16_t seq,
         return miplay_send_encrypted(session, cmd, seq, payload, payload_len);
     }
     return miplay_send_frame(session->sock, cmd, seq, payload, payload_len);
+}
+
+// 空 mediaInfoEx NOTIFY（29 字节，对齐参考 esp_miplay-main）。
+// HyperOS 在消费一条加密的空 mediaInfoEx NOTIFY 时安装 reverse-control /
+// skip-metadata callback。此后手机推送的 SetMediaInfo 才会携带 mCoverUrl/mTitle。
+// 缺此 NOTIFY → CMD_SET_MEDIA_INFO(0x0012) 永远不会到达。
+static const uint8_t s_empty_media_info_ex[29] = {
+    0x0B, 'm', 'e', 'd', 'i', 'a', 'I', 'n', 'f', 'o', 'E', 'x',
+    0x16, 0x00, 0x00, 0x00, 0x0C, 0x06,
+    'm', 'T', 'i', 't', 'l', 'e',
+    0x14, 0x00, 0x00, 0x00, 0x00,
+};
+
+// 发送空 mediaInfoEx NOTIFY 并记日志。SafetyAuth 成功后 + OPEN_DEVICE 后各调一次。
+void send_empty_media_info_ex(miplay_session_t *session, const char *reason)
+{
+    send_maybe_encrypted(session, CMD_NOTIFY,
+                         miplay_next_notify_seq(session),
+                         s_empty_media_info_ex,
+                         sizeof(s_empty_media_info_ex));
+    ESP_LOGI(kTag, "-> NOTIFY empty mediaInfoEx (%s)", reason);
 }
 
 // 处理 0x36 版本交换：回 VERSION_ACK。
@@ -409,7 +499,9 @@ void disconnect_cleanup(miplay_session_t *session)
         return;
     }
     const int client_sock = session->sock;
-    s_connected = false;
+    set_connected(false);
+    // 递增 media generation，让 RTSP/media 任务自退出。
+    miplay_media_stop();
     miplay_session_lock(1000);
     close(client_sock);
     // 会话级敏感材料必须清零：跨会话残留会让新连接用旧密钥解密，
@@ -649,7 +741,9 @@ void client_loop(miplay_session_t *session)
                                 pending_ack_valid, pending_ack_seq)) {
                             ESP_LOGI(kTag, "control channel authenticated");
                             session->reverse_control_ready = true;
-                            s_connected = true;
+                            // 关键：发空 mediaInfoEx NOTIFY，让 HyperOS 安装
+                            // metadata push callback。不发此帧 → 0x0012 永远不到。
+                            send_empty_media_info_ex(session, "SafetyAuth");
                         } else {
                             // 认证失败必须断开：继续跑下去所有加密帧都会失败，
                             // 问题会在更晚、更难定位的地方暴露。
@@ -680,20 +774,309 @@ void client_loop(miplay_session_t *session)
                 case CMD_GET_DEVICE_INFO:
                     handle_get_device_info(session, seq);
                     break;
+                case CMD_SET_VOLUME: {
+                    // payload: 4 字节 uint32 BE，音量百分比 0-100。
+                    uint32_t vol = miplay_media_get_volume();
+                    if (plen >= 4) {
+                        vol = ((uint32_t)payload[0] << 24) |
+                              ((uint32_t)payload[1] << 16) |
+                              ((uint32_t)payload[2] << 8) | payload[3];
+                        if (vol > 100) vol = 100;
+                        miplay_media_set_volume(vol);
+                        ESP_LOGI(kTag, "SET_VOLUME -> %lu", (unsigned long)vol);
+                    }
+                    // ACK: 5 字节 {0x00, vol_u32_be}
+                    uint8_t ack[5] = {};
+                    ack[1] = (uint8_t)((vol >> 24) & 0xFF);
+                    ack[2] = (uint8_t)((vol >> 16) & 0xFF);
+                    ack[3] = (uint8_t)((vol >> 8) & 0xFF);
+                    ack[4] = (uint8_t)(vol & 0xFF);
+                    send_maybe_encrypted(session, CMD_SET_VOLUME + 1, seq,
+                                         ack, sizeof(ack));
+                    // NOTIFY: 通知手机音量已变更。
+                    uint8_t notify_body[12] = {};
+                    notify_body[0] = 0x06;                           // key_len
+                    memcpy(&notify_body[1], "volume", 6);            // key
+                    notify_body[7] = 0x07;                           // value_type = u32
+                    notify_body[8] = (uint8_t)((vol >> 24) & 0xFF);  // value BE
+                    notify_body[11] = (uint8_t)(vol & 0xFF);
+                    send_maybe_encrypted(session, CMD_NOTIFY,
+                                         miplay_next_notify_seq(session),
+                                         notify_body, sizeof(notify_body));
+                    break;
+                }
+                case CMD_GET_VOLUME: {
+                    uint32_t vol = miplay_media_get_volume();
+                    uint8_t body[5] = {};
+                    body[1] = (uint8_t)((vol >> 24) & 0xFF);
+                    body[2] = (uint8_t)((vol >> 16) & 0xFF);
+                    body[3] = (uint8_t)((vol >> 8) & 0xFF);
+                    body[4] = (uint8_t)(vol & 0xFF);
+                    send_maybe_encrypted(session, CMD_GET_VOLUME + 1, seq,
+                                         body, sizeof(body));
+                    ESP_LOGD(kTag, "GET_VOLUME -> %lu", (unsigned long)vol);
+                    break;
+                }
                 case CMD_OPEN_DEVICE: {
-                    // 媒体层未接入：只回 ACK，不建立媒体会话。这样手机能
-                    // 完成"识别 + 控制"，不会因我们不响应而判设备不可用。
-                    const uint8_t ack_body[] = {0, 0, 0, 0, 0};
-                    send_maybe_encrypted(session, CMD_OPEN_DEVICE + 1, seq,
-                                         ack_body, sizeof(ack_body));
-                    ESP_LOGI(kTag, "-> OPEN_ACK (media layer not attached)");
-                    session->media_session_opened = true;
-                    s_connected = true;
+                    // 媒体层：解析 wfd:// URL，启动 RTSP 任务。
+                    miplay_media_handle_open_device(session, payload, plen, seq);
+                    set_connected(true);
+                    // 参考 esp-miply-1.85touch: OPEN_DEVICE 后再发一次空
+                    // mediaInfoEx NOTIFY，确保手机 metadata push 已激活。
+                    send_empty_media_info_ex(session, "OPEN_DEVICE");
+                    break;
+                }
+                case CMD_SET_MEDIA_INFO: {
+                    // 手机推送歌曲元数据（title/artist/album/duration）。
+                    // payload 可能是 OPack 二进制 TLV 或 JSON。
+                    // JSON 可能有多层壳：{"metadata":"..."} 或 {"mediaInfoEx":{...}}
+                    ESP_LOGI(kTag, "SET_MEDIA_INFO seq=%u len=%u",
+                             seq, static_cast<unsigned>(plen));
+                    if (plen > 0) {
+                        char hex[193];
+                        size_t dump = plen < 64 ? plen : 64;
+                        for (size_t i = 0; i < dump; i++)
+                            snprintf(hex + i * 3, 4, "%02X ", payload[i]);
+                        ESP_LOGI(kTag, "SET_MEDIA_INFO payload: %s", hex);
+                    }
+                    char title[128] = {};
+                    char artist[64] = {};
+                    char album[64] = {};
+                    int64_t duration_ms = 0;
+                    int64_t position_ms = 0;
+
+                    // 辅助 lambda：从 JSON 字符串中提取字段值
+                    const char *pj = reinterpret_cast<const char *>(payload);
+                    auto json_get = [&](const char *key, char *out, size_t out_sz) -> bool {
+                        char needle[64];
+                        snprintf(needle, sizeof(needle), "\"%s\":", key);
+                        const char *f = strstr(pj, needle);
+                        if (!f) return false;
+                        f += strlen(needle);
+                        // 跳过空格和引号
+                        while (*f == ' ' || *f == '\t') f++;
+                        if (*f == '"') {
+                            f++; // 跳过开引号
+                            const char *e = strchr(f, '"');
+                            if (!e || (size_t)(e - f) >= out_sz) return false;
+                            memcpy(out, f, e - f);
+                            out[e - f] = '\0';
+                            return true;
+                        }
+                        // 数值
+                        char *endp;
+                        long long val = strtoll(f, &endp, 10);
+                        if (endp > f) {
+                            snprintf(out, out_sz, "%lld", val);
+                            return true;
+                        }
+                        return false;
+                    };
+                    auto json_get_num = [&](const char *key) -> int64_t {
+                        char buf[32];
+                        return json_get(key, buf, sizeof(buf)) ? strtoll(buf, nullptr, 10) : 0;
+                    };
+
+                    if (plen > 0 && payload[0] == '{') {
+                        // JSON 路径：先剥壳 {"metadata":"..."} / {"mediaInfoEx":{...}}
+                        // 然后直接查找字段
+                        json_get("mTitle", title, sizeof(title));
+                        if (!title[0]) json_get("title", title, sizeof(title));
+                        if (!title[0]) json_get("songName", title, sizeof(title));
+                        json_get("mArtist", artist, sizeof(artist));
+                        if (!artist[0]) json_get("artist", artist, sizeof(artist));
+                        if (!artist[0]) json_get("singer", artist, sizeof(artist));
+                        json_get("mAlbum", album, sizeof(album));
+                        if (!album[0]) json_get("album", album, sizeof(album));
+                        duration_ms = json_get_num("mDuration");
+                        if (!duration_ms) duration_ms = json_get_num("duration");
+                        if (!duration_ms) duration_ms = json_get_num("durationMs");
+                        position_ms = json_get_num("mPosition");
+                        if (!position_ms) position_ms = json_get_num("position");
+                        if (!position_ms) position_ms = json_get_num("positionMs");
+                    } else if (plen > 4) {
+                        // OPack 二进制路径
+                        OPackField f;
+                        if (opack_find_field(payload, plen, "mTitle", &f) ||
+                            opack_find_field(payload, plen, "title", &f))
+                            opack_field_to_str(f, title, sizeof(title));
+                        if (opack_find_field(payload, plen, "mArtist", &f) ||
+                            opack_find_field(payload, plen, "artist", &f))
+                            opack_field_to_str(f, artist, sizeof(artist));
+                        if (opack_find_field(payload, plen, "mAlbum", &f) ||
+                            opack_find_field(payload, plen, "album", &f))
+                            opack_field_to_str(f, album, sizeof(album));
+                        if (opack_find_field(payload, plen, "mDuration", &f) ||
+                            opack_find_field(payload, plen, "duration", &f)) {
+                            char dur_buf[32];
+                            opack_field_to_str(f, dur_buf, sizeof(dur_buf));
+                            duration_ms = strtoll(dur_buf, nullptr, 10);
+                        }
+                        if (opack_find_field(payload, plen, "mPosition", &f) ||
+                            opack_find_field(payload, plen, "position", &f)) {
+                            char pos_buf[32];
+                            opack_field_to_str(f, pos_buf, sizeof(pos_buf));
+                            position_ms = strtoll(pos_buf, nullptr, 10);
+                        }
+                    }
+                    if (title[0]) {
+                        ESP_LOGI(kTag, "Media info: title='%s' artist='%s' album='%s' dur=%lld pos=%lld",
+                                 title, artist, album, (long long)duration_ms, (long long)position_ms);
+                        miplay_media_dispatch_meta(title, artist, album, duration_ms, position_ms);
+                    }
+                    // ACK
+                    send_maybe_encrypted(session, CMD_SET_MEDIA_INFO_ACK, seq,
+                                         nullptr, 0);
+                    break;
+                }
+                case CMD_GET_MEDIA_INFO: {
+                    // 手机查询媒体信息。参考 esp-miply-1.85touch：始终回空
+                    // mediaInfoEx NOTIFY，引导手机安装 metadata push callback。
+                    ESP_LOGI(kTag, "GET_MEDIA_INFO seq=%u", seq);
+                    send_empty_media_info_ex(session, "GetMediaInfo");
+                    break;
+                }
+                case CMD_NOTIFY: {
+                    // 入站 NOTIFY (0x0022)：mirror mode 2 下手机把媒体信息/播放
+                    // 状态作为 0x0022 通知异步下发（而非 SET_MEDIA_INFO）。
+                    // payload 可能是 JSON 或 OPack 二进制 TLV。
+                    ESP_LOGI(kTag, "[NOTIFY-in] seq=%u len=%u",
+                             seq, static_cast<unsigned>(plen));
+                    if (plen > 0 && (payload[0] == '{' || payload[0] == '[')) {
+                        // JSON 路径：直接提取元数据字段
+                        char title[64] = {}, artist[64] = {}, album[64] = {};
+                        int64_t duration_ms = 0, position_ms = 0;
+                        const char *p = reinterpret_cast<const char *>(payload);
+                        // JSON 字段查找 lambda（多别名 fallback）
+                        auto find_json_str = [&](const char *keys[], char *out, size_t out_sz) {
+                            for (int i = 0; keys[i]; i++) {
+                                const char *f = strstr(p, keys[i]);
+                                if (f) {
+                                    f += strlen(keys[i]);
+                                    const char *e = strchr(f, '"');
+                                    if (e && (size_t)(e - f) < out_sz) {
+                                        memcpy(out, f, e - f);
+                                        out[e - f] = '\0';
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        };
+                        auto find_json_num = [&](const char *keys[]) -> int64_t {
+                            for (int i = 0; keys[i]; i++) {
+                                const char *f = strstr(p, keys[i]);
+                                if (f) return strtoll(f + strlen(keys[i]), nullptr, 10);
+                            }
+                            return 0;
+                        };
+                        { const char *ks[] = {"\"mTitle\":\"", "\"title\":\"", "\"songName\":\"", nullptr};
+                          find_json_str(ks, title, sizeof(title)); }
+                        { const char *ks[] = {"\"mArtist\":\"", "\"artist\":\"", "\"singer\":\"", nullptr};
+                          find_json_str(ks, artist, sizeof(artist)); }
+                        { const char *ks[] = {"\"mAlbum\":\"", "\"album\":\"", nullptr};
+                          find_json_str(ks, album, sizeof(album)); }
+                        { const char *ks[] = {"\"mDuration\":", "\"duration\":", "\"durationMs\":", nullptr};
+                          duration_ms = find_json_num(ks); }
+                        { const char *ks[] = {"\"mPosition\":", "\"position\":", "\"positionMs\":", nullptr};
+                          position_ms = find_json_num(ks); }
+                        if (title[0]) {
+                            ESP_LOGI(kTag, "NOTIFY-in meta: title='%s' artist='%s' album='%s' dur=%lld pos=%lld",
+                                     title, artist, album, (long long)duration_ms, (long long)position_ms);
+                            miplay_media_dispatch_meta(title, artist, album, duration_ms, position_ms);
+                        }
+                    } else if (plen > 0) {
+                        // OPack 二进制路径：尝试用已有 OPack 解析器
+                        char title[64] = {}, artist[64] = {}, album[64] = {};
+                        int64_t duration_ms = 0, position_ms = 0;
+                        OPackField f;
+                        if (opack_find_field(payload, plen, "mTitle", &f) ||
+                            opack_find_field(payload, plen, "title", &f)) {
+                            opack_field_to_str(f, title, sizeof(title));
+                        }
+                        if (opack_find_field(payload, plen, "mArtist", &f) ||
+                            opack_find_field(payload, plen, "artist", &f)) {
+                            opack_field_to_str(f, artist, sizeof(artist));
+                        }
+                        if (opack_find_field(payload, plen, "mAlbum", &f) ||
+                            opack_find_field(payload, plen, "album", &f)) {
+                            opack_field_to_str(f, album, sizeof(album));
+                        }
+                        if (opack_find_field(payload, plen, "mDuration", &f) ||
+                            opack_find_field(payload, plen, "duration", &f)) {
+                            char dur_buf[32];
+                            opack_field_to_str(f, dur_buf, sizeof(dur_buf));
+                            duration_ms = strtoll(dur_buf, nullptr, 10);
+                        }
+                        if (opack_find_field(payload, plen, "mPosition", &f) ||
+                            opack_find_field(payload, plen, "position", &f)) {
+                            char pos_buf[32];
+                            opack_field_to_str(f, pos_buf, sizeof(pos_buf));
+                            position_ms = strtoll(pos_buf, nullptr, 10);
+                        }
+                        if (title[0]) {
+                            ESP_LOGI(kTag, "NOTIFY-in OPack meta: title='%s' artist='%s' dur=%lld",
+                                     title, artist, (long long)duration_ms);
+                            miplay_media_dispatch_meta(title, artist, album, duration_ms, position_ms);
+                        } else {
+                            ESP_LOGW(kTag, "[NOTIFY-in] OPack payload first=%02X %02X %02X %02X (no meta found)",
+                                     payload[0], plen > 1 ? payload[1] : 0,
+                                     plen > 2 ? payload[2] : 0, plen > 3 ? payload[3] : 0);
+                        }
+                    }
                     break;
                 }
                 default:
-                    ESP_LOGD(kTag, "unhandled cmd=0x%04X len=%u", cmd,
-                             static_cast<unsigned>(plen));
+                    if (cmd == 0x006C) {
+                        // SetMirrorKey：媒体流加密密钥。
+                        ESP_LOGI(kTag, "SetMirrorKey seq=%u len=%u", seq,
+                                 static_cast<unsigned>(plen));
+                        miplay_media_set_stream_key(payload, plen);
+                        uint8_t mk_body[] = {0x00};
+                        send_maybe_encrypted(session, 0x006D, seq, mk_body,
+                                             sizeof(mk_body));
+                    } else if (cmd == CMD_SET_LOCAL_DEV_INFO) {
+                        // SetLocalDeviceInfo (0x0058)：手机推送本机信息，必须 ACK。
+                        ESP_LOGI(kTag, "SetLocalDevInfo seq=%u len=%u", seq,
+                                 static_cast<unsigned>(plen));
+                        send_maybe_encrypted(session, CMD_SET_LOCAL_DEV_ACK, seq,
+                                             nullptr, 0);
+                    } else if (cmd == CMD_GET_MIRROR_MODE) {
+                        // GetMirrorMode (0x0034)：mode=1 = 移动音频流
+                        //（HyperOS 发 SET_MEDIA_INFO + 装反向控制）。
+                        ESP_LOGI(kTag, "GetMirrorMode seq=%u", seq);
+                        uint8_t mode_resp[] = {0x00, 0x00, 0x00, 0x00, 0x01};
+                        send_maybe_encrypted(session, CMD_GET_MIRROR_MODE_ACK, seq,
+                                             mode_resp, sizeof(mode_resp));
+                    } else if (cmd == CMD_SET_PLAY_SOURCE) {
+                        // SetPlaySource (0x0040)：可能携带媒体信息。
+                        ESP_LOGI(kTag, "SetPlaySource seq=%u len=%u", seq,
+                                 static_cast<unsigned>(plen));
+                        send_maybe_encrypted(session, CMD_SET_PLAY_SOURCE + 1, seq,
+                                             nullptr, 0);
+                    } else if (cmd == CMD_PAUSE || cmd == CMD_RESUME) {
+                        // 暂停/恢复：ACK + 通知 UI 层状态变化。
+                        ESP_LOGI(kTag, "media ctrl cmd=0x%04X seq=%u", cmd, seq);
+                        send_maybe_encrypted(session, cmd + 1, seq, nullptr, 0);
+                        miplay_media_dispatch_pause(cmd == CMD_PAUSE);
+                    } else if (cmd == CMD_SET_POSITION) {
+                        // SetPosition (0x0056)：前8字节大端毫秒位置。
+                        int64_t pos_ms = 0;
+                        if (plen >= 8) {
+                            for (int i = 0; i < 8; i++)
+                                pos_ms = (pos_ms << 8) | (int64_t)payload[i];
+                        }
+                        ESP_LOGI(kTag, "SetPosition seq=%u pos=%lldms", seq, (long long)pos_ms);
+                        miplay_media_dispatch_meta(nullptr, nullptr, nullptr, 0, pos_ms);
+                        send_maybe_encrypted(session, cmd + 1, seq, nullptr, 0);
+                    } else if (cmd == CMD_SET_MEDIA_STATE) {
+                        // SetMediaState (0x005E)：播放状态变化，ACK。
+                        ESP_LOGI(kTag, "SetMediaState seq=%u", seq);
+                        send_maybe_encrypted(session, cmd + 1, seq, nullptr, 0);
+                    } else {
+                        ESP_LOGD(kTag, "unhandled cmd=0x%04X len=%u", cmd,
+                                 static_cast<unsigned>(plen));
+                    }
                     break;
                 }
             }
@@ -821,7 +1204,7 @@ esp_err_t miplay_control_start(void)
     }
     miplay_session_init();
     s_control_running = true;
-    s_connected = false;
+    set_connected(false);
 
     // 监听任务自身栈很小（只做 accept），放内部 SRAM 即可。
     const BaseType_t ret = xTaskCreatePinnedToCore(
@@ -838,7 +1221,7 @@ esp_err_t miplay_control_start(void)
 void miplay_control_stop(void)
 {
     s_control_running = false;
-    s_connected = false;
+    set_connected(false);
     if (s_listen_sock >= 0) {
         // 关掉监听 socket 让阻塞中的 accept 立即返回，任务自行退出。
         shutdown(s_listen_sock, SHUT_RDWR);
@@ -848,4 +1231,17 @@ void miplay_control_stop(void)
 bool miplay_control_is_connected(void)
 {
     return s_connected;
+}
+
+void miplay_control_reset_connected(void)
+{
+    if (s_connected) {
+        s_connected = false;
+        ESP_LOGI(kTag, "connected state reset (stream ended)");
+    }
+}
+
+void miplay_control_set_connection_callback(miplay_connection_changed_fn fn)
+{
+    s_conn_cb = fn;
 }

@@ -4,5 +4,5 @@
 #include "ui_work_page_catalog.h"
 
 bool work_page_catalog_init();
-void work_page_enabled_mask_store(uint8_t page_mask);
+void work_page_enabled_mask_store(WorkPageMask page_mask);
 void work_page_order_replace(const uint8_t *order, size_t order_size);
